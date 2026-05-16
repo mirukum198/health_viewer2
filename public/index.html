@@ -223,7 +223,7 @@ tr:last-child td { border-bottom:none; }
       <div class="hv-drop-icon">&#128230;</div>
       <div class="hv-drop-main">export.zip または export.xml をドロップ</div>
       <div class="hv-drop-sub">クリックしてファイルを選択</div>
-      <input type="file" id="hv-fileInput" accept=".zip,.xml">
+      <input type="file" id="hv-fileInput" accept=".zip,.xml" style="display:none">
     </div>
 
     <div class="hv-progress-wrap" id="hv-progressWrap">
@@ -682,7 +682,8 @@ function hvId(id) { return document.getElementById('hv-'+id); }
 
 // Drop zone
 const hvDrop=hvId('dropZone'), hvFileInput=hvId('fileInput');
-hvDrop.addEventListener('click', ()=>hvFileInput.click());
+hvDrop.addEventListener('click', e=>{ if(e.target!==hvFileInput) hvFileInput.click(); });
+hvFileInput.addEventListener('click', e=>e.stopPropagation());
 hvDrop.addEventListener('dragover', e=>{ e.preventDefault(); hvDrop.classList.add('dragover'); });
 hvDrop.addEventListener('dragleave', ()=>hvDrop.classList.remove('dragover'));
 hvDrop.addEventListener('drop', e=>{ e.preventDefault(); hvDrop.classList.remove('dragover'); if(e.dataTransfer.files[0]) hvProcessFile(e.dataTransfer.files[0]); });
@@ -1020,7 +1021,7 @@ function hvSetProgress(show, pct=0, label='') {
 }
 function hvHideResults() {
   ['summaryRow','filterWrap','weightChartWrap','fatChartWrap','activityChartWrap','calorieChartWrap','sleepChartWrap','tabsWrap','tableWrap','detailWrap','aiWrap']
-    .forEach(id=>hvId(id).style.display='none');
+    .forEach(id=>{ const el=hvId(id); if(el) el.style.display='none'; });
 }
 function hvHideError() { hvId('errorBox').style.display='none'; }
 function hvShowError(msg) { const el=hvId('errorBox'); el.textContent=msg; el.style.display='block'; }
