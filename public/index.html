@@ -362,7 +362,15 @@ function switchTopTab(tab) {
 // localStorage（食事）
 // ============================================================
 function loadAll() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)||'{}'); } catch { return {}; } }
-function saveAll(data) { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
+function saveAll(data) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  } catch(e) {
+    if (e.name==='QuotaExceededError'||e.code===22) {
+      toast('保存失敗: ストレージ容量不足。写真を減らすか古い記録を削除してください。');
+    } else { throw e; }
+  }
+}
 function emptyDay() { const d={}; MEALS.forEach(m=>{d[m.key]={photos:[],memo:''}}); return d; }
 function loadDayData(date) {
   const raw = loadAll()[date];
@@ -718,10 +726,14 @@ function importBackup(input) {
 // ============================================================
 // 日付ナビ
 // ============================================================
-document.getElementById('prevDay').addEventListener('click', ()=>{ saveDay(true); currentDate=addDays(currentDate,-1); renderDay(currentDate); });
-document.getElementById('nextDay').addEventListener('click', ()=>{ saveDay(true); currentDate=addDays(currentDate,1); renderDay(currentDate); });
+function navToDate(newDate) {
+  try { saveDay(true); } catch(e) { console.warn('saveDay on nav:', e); }
+  currentDate = newDate; renderDay(currentDate);
+}
+document.getElementById('prevDay').addEventListener('click', ()=>navToDate(addDays(currentDate,-1)));
+document.getElementById('nextDay').addEventListener('click', ()=>navToDate(addDays(currentDate,1)));
 document.getElementById('dateDisplay').addEventListener('click', ()=>{ document.getElementById('datePicker').showPicker?.(); document.getElementById('datePicker').click(); });
-document.getElementById('datePicker').addEventListener('change', e=>{ if(!e.target.value)return; saveDay(true); currentDate=e.target.value; renderDay(currentDate); });
+document.getElementById('datePicker').addEventListener('change', e=>{ if(!e.target.value)return; navToDate(e.target.value); });
 
 // ============================================================
 // ヘルスデータタブ（health_viewer1 統合・hv_ プレフィックス）
