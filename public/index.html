@@ -367,20 +367,95 @@ function saveAll(data) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   } catch(e) {
     if (e.name==='QuotaExceededError'||e.code===22) {
-      toast('保存失敗: ストレージ容量不足。写真を減らすか古い記録を削除してください。');
+      toast('保存失敗: ストレージ容量不足。古い記録を削除してください。');
     } else { throw e; }
   }
 }
-function emptyDay() { const d={}; MEALS.forEach(m=>{d[m.key]={photos:[],memo:''}}); return d; }
+function emptyDay() { const d={}; MEALS.forEach(m=>{d[m.key]={photoCount:0,memo:''}}); return d; }
 function loadDayData(date) {
-  const raw = loadAll()[date];
-  if (!raw) return emptyDay();
+  const raw = loadAll()[date]; if (!raw) return emptyDay();
   const d = {};
-  MEALS.forEach(m => {
-    const meal = raw[m.key] || {};
-    d[m.key] = { photos: meal.photos || (meal.photo?[meal.photo]:[]), memo: meal.memo||'' };
-  });
+  MEALS.forEach(m => { const meal = raw[m.key]||{}; d[m.key] = { photoCount: meal.photoCount||0, memo: meal.memo||'' }; });
   return d;
+}
+
+// ============================================================
+// IndexedDB（写真ストレージ）
+// ============================================================
+const IDB_NAME = 'hv2_photos';
+const IDB_STORE = 'photos';
+let _idb = null;
+
+function getDB() {
+  if (_idb) return Promise.resolve(_idb);
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, 1);
+    req.onupgradeneeded = e => e.target.result.createObjectStore(IDB_STORE);
+    req.onsuccess = e => { _idb = e.target.result; resolve(_idb); };
+    req.onerror = e => reject(e.target.error);
+  });
+}
+async function idbPut(key, blob) {
+  const db = await getDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).put(blob, key);
+    tx.oncomplete = resolve; tx.onerror = e => reject(e.target.error);
+  });
+}
+async function idbGet(key) {
+  const db = await getDB();
+  return new Promise((resolve, reject) => {
+    const req = db.transaction(IDB_STORE).objectStore(IDB_STORE).get(key);
+    req.onsuccess = e => resolve(e.target.result);
+    req.onerror = e => reject(e.target.error);
+  });
+}
+async function idbDelete(key) {
+  const db = await getDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).delete(key);
+    tx.oncomplete = resolve; tx.onerror = e => reject(e.target.error);
+  });
+}
+async function idbGetAllKeys() {
+  const db = await getDB();
+  return new Promise((resolve, reject) => {
+    const req = db.transaction(IDB_STORE).objectStore(IDB_STORE).getAllKeys();
+    req.onsuccess = e => resolve(e.target.result);
+    req.onerror = e => reject(e.target.error);
+  });
+}
+function photoKey(date, mealKey, idx) { return `${date}_${mealKey}_${idx}`; }
+function blobToDataUrl(blob) {
+  return new Promise(resolve => {
+    const r = new FileReader(); r.onload = e => resolve(e.target.result); r.readAsDataURL(blob);
+  });
+}
+
+// 旧localStorage形式（photos配列）→ IndexedDB への自動移行
+async function migratePhotos() {
+  const all = loadAll(); let changed = false;
+  for (const [date, dayData] of Object.entries(all)) {
+    for (const meal of MEALS) {
+      const md = dayData[meal.key]; if (!md) continue;
+      const oldPhotos = md.photos || (md.photo ? [md.photo] : null);
+      if (oldPhotos && oldPhotos.length > 0) {
+        for (let i = 0; i < oldPhotos.length; i++) {
+          if (oldPhotos[i]?.startsWith('data:')) {
+            const res = await fetch(oldPhotos[i]); const blob = await res.blob();
+            await idbPut(photoKey(date, meal.key, i), blob);
+          }
+        }
+        dayData[meal.key] = { photoCount: oldPhotos.length, memo: md.memo || '' };
+        changed = true;
+      } else if (typeof md.photoCount === 'undefined') {
+        dayData[meal.key] = { photoCount: 0, memo: md.memo || '' }; changed = true;
+      }
+    }
+  }
+  if (changed) saveAll(all);
 }
 
 // ============================================================
@@ -411,14 +486,12 @@ function buildMealGrid() {
   });
 }
 
-function renderDay(date) {
+async function renderDay(date) {
   document.getElementById('dateDisplay').textContent = fmtDate(date);
   document.getElementById('datePicker').value = date;
   const data = loadDayData(date);
-  MEALS.forEach(meal => {
-    document.getElementById(`memo-${meal.key}`).value = data[meal.key].memo || '';
-    renderPhotoStrip(meal.key, data[meal.key].photos || []);
-  });
+  MEALS.forEach(meal => { document.getElementById(`memo-${meal.key}`).value = data[meal.key].memo || ''; });
+  for (const meal of MEALS) { await renderPhotoStrip(meal.key); }
   updateComposite(); renderHistory(); updateWeekSelect();
 }
 
@@ -429,42 +502,52 @@ function triggerPhoto(mealKey) { const inp = document.getElementById(`photoInput
 
 async function handlePhoto(mealKey, input) {
   if (!input.files||!input.files[0]) return;
-  const data = loadDayData(currentDate);
-  const photos = data[mealKey].photos;
-  if (photos.length >= MAX_PHOTOS) { toast(`写真は最大${MAX_PHOTOS}枚です`); return; }
-  const compressed = await compressImage(input.files[0]);
-  photos.push(compressed);
-  renderPhotoStrip(mealKey, photos);
-  autoSave();
-}
-
-function renderPhotoStrip(mealKey, photos) {
-  const strip = document.getElementById(`strip-${mealKey}`);
-  const addBtn = document.getElementById(`addBtn-${mealKey}`);
-  const badge  = document.getElementById(`badge-${mealKey}`);
-  strip.querySelectorAll('.photo-thumb').forEach(el => el.remove());
-  photos.forEach((dataUrl, idx) => {
-    const thumb = document.createElement('div');
-    thumb.className = 'photo-thumb';
-    thumb.innerHTML = `<img src="${dataUrl}" alt=""><button class="photo-thumb-remove" onclick="removePhoto('${mealKey}',${idx})">&#x2715;</button>`;
-    strip.appendChild(thumb);
-  });
-  addBtn.classList.toggle('disabled', photos.length >= MAX_PHOTOS);
-  badge.textContent = photos.length > 0 ? `${photos.length}/${MAX_PHOTOS}` : '';
-}
-
-function removePhoto(mealKey, idx) {
+  const countCheck = loadAll()[currentDate]?.[mealKey]?.photoCount || 0;
+  if (countCheck >= MAX_PHOTOS) { toast(`写真は最大${MAX_PHOTOS}枚です`); return; }
+  const blob = await compressImageToBlob(input.files[0]);
   const all = loadAll();
-  if (!all[currentDate]) return;
-  const photos = all[currentDate][mealKey]?.photos || [];
-  photos.splice(idx, 1);
-  all[currentDate][mealKey].photos = photos;
+  if (!all[currentDate]) all[currentDate] = emptyDay();
+  if (!all[currentDate][mealKey]) all[currentDate][mealKey] = { photoCount:0, memo:'' };
+  const count = all[currentDate][mealKey].photoCount || 0;
+  if (count >= MAX_PHOTOS) { toast(`写真は最大${MAX_PHOTOS}枚です`); return; }
+  await idbPut(photoKey(currentDate, mealKey, count), blob);
+  all[currentDate][mealKey].photoCount = count + 1;
   saveAll(all);
-  renderPhotoStrip(mealKey, photos);
+  await renderPhotoStrip(mealKey);
   updateComposite();
 }
 
-async function compressImage(file, maxW=900, quality=0.78) {
+async function renderPhotoStrip(mealKey) {
+  const count = loadAll()[currentDate]?.[mealKey]?.photoCount || 0;
+  const strip = document.getElementById(`strip-${mealKey}`);
+  const addBtn = document.getElementById(`addBtn-${mealKey}`);
+  const badge  = document.getElementById(`badge-${mealKey}`);
+  strip.querySelectorAll('.photo-thumb img').forEach(img => { if (img.src.startsWith('blob:')) URL.revokeObjectURL(img.src); });
+  strip.querySelectorAll('.photo-thumb').forEach(el => el.remove());
+  for (let idx = 0; idx < count; idx++) {
+    const blob = await idbGet(photoKey(currentDate, mealKey, idx));
+    if (!blob) continue;
+    const url = URL.createObjectURL(blob);
+    const thumb = document.createElement('div'); thumb.className = 'photo-thumb';
+    thumb.innerHTML = `<img src="${url}" alt=""><button class="photo-thumb-remove" onclick="removePhoto('${mealKey}',${idx})">&#x2715;</button>`;
+    strip.appendChild(thumb);
+  }
+  addBtn.classList.toggle('disabled', count >= MAX_PHOTOS);
+  badge.textContent = count > 0 ? `${count}/${MAX_PHOTOS}` : '';
+}
+
+async function removePhoto(mealKey, idx) {
+  const all = loadAll(); const count = all[currentDate]?.[mealKey]?.photoCount || 0;
+  for (let i = idx; i < count - 1; i++) {
+    const blob = await idbGet(photoKey(currentDate, mealKey, i + 1));
+    if (blob) await idbPut(photoKey(currentDate, mealKey, i), blob);
+  }
+  await idbDelete(photoKey(currentDate, mealKey, count - 1));
+  if (all[currentDate]?.[mealKey]) { all[currentDate][mealKey].photoCount = Math.max(0, count - 1); saveAll(all); }
+  await renderPhotoStrip(mealKey); updateComposite();
+}
+
+async function compressImageToBlob(file, maxW=900, quality=0.78) {
   return new Promise(resolve => {
     const img = new Image(), url = URL.createObjectURL(file);
     img.onload = () => {
@@ -473,7 +556,7 @@ async function compressImage(file, maxW=900, quality=0.78) {
       let w=img.naturalWidth, h=img.naturalHeight;
       if (w>maxW) { h=Math.round(h*maxW/w); w=maxW; }
       c.width=w; c.height=h; c.getContext('2d').drawImage(img,0,0,w,h);
-      resolve(c.toDataURL('image/jpeg', quality));
+      c.toBlob(blob => resolve(blob), 'image/jpeg', quality);
     };
     img.src = url;
   });
@@ -489,20 +572,23 @@ function saveDay(silent=false) {
   const all = loadAll();
   if (!all[currentDate]) all[currentDate] = emptyDay();
   MEALS.forEach(meal => {
-    const imgs = document.querySelectorAll(`#strip-${meal.key} .photo-thumb img`);
-    all[currentDate][meal.key] = {
-      photos: Array.from(imgs).map(img => img.src),
-      memo: document.getElementById(`memo-${meal.key}`).value,
-    };
+    if (!all[currentDate][meal.key]) all[currentDate][meal.key] = { photoCount:0, memo:'' };
+    all[currentDate][meal.key].memo = document.getElementById(`memo-${meal.key}`).value;
   });
   saveAll(all);
   if (!silent) { toast('保存しました'); updateComposite(); renderHistory(); }
 }
 
-function clearDay() {
+async function clearDay() {
   if (!confirm('この日の記録を削除しますか？')) return;
-  const all = loadAll(); delete all[currentDate]; saveAll(all);
-  MEALS.forEach(meal => { renderPhotoStrip(meal.key,[]); document.getElementById(`memo-${meal.key}`).value=''; });
+  const all = loadAll();
+  const dayMeta = all[currentDate] || {};
+  for (const meal of MEALS) {
+    const count = dayMeta[meal.key]?.photoCount || 0;
+    for (let i = 0; i < count; i++) await idbDelete(photoKey(currentDate, meal.key, i));
+  }
+  delete all[currentDate]; saveAll(all);
+  for (const meal of MEALS) { await renderPhotoStrip(meal.key); document.getElementById(`memo-${meal.key}`).value=''; }
   updateComposite(); renderHistory(); toast('削除しました');
 }
 
@@ -510,32 +596,42 @@ function clearDay() {
 // 合成画像
 // ============================================================
 function updateComposite() {
-  const data = loadDayData(currentDate);
-  const hasPhoto = MEALS.some(m=>(data[m.key]?.photos?.length??0)>0);
+  const all = loadAll(); const dayMeta = all[currentDate] || {};
+  const hasPhoto = MEALS.some(m => (dayMeta[m.key]?.photoCount || 0) > 0);
   if (hasPhoto) generateComposite();
-  else { document.getElementById('compositePreview').style.display='none'; document.getElementById('noPhotoMsg').style.display='block'; }
+  else {
+    const preview = document.getElementById('compositePreview');
+    preview.style.display='none'; preview.src='';
+    document.getElementById('noPhotoMsg').style.display='block';
+  }
 }
 
 async function generateComposite() {
-  const data = loadDayData(currentDate);
+  const all = loadAll(); const dayMeta = all[currentDate] || {};
   const size=800, half=400;
   const canvas = document.createElement('canvas'); canvas.width=size; canvas.height=size;
   const ctx = canvas.getContext('2d');
-  ctx.fillStyle='#0f1117'; ctx.fillRect(0,0,size,size);
+  ctx.fillStyle='#f0f0f0'; ctx.fillRect(0,0,size,size);
   const pos = [{x:0,y:0},{x:half,y:0},{x:0,y:half},{x:half,y:half}];
-  const colors = ['#f7934f','#4fbbf7','#6dd68a','#c47ff7'];
-  for (let i=0;i<MEALS.length;i++) {
+  const colors = ['#ff9500','#32ade6','#34c759','#5856d6'];
+  for (let i=0; i<MEALS.length; i++) {
     const meal=MEALS[i]; const {x,y}=pos[i];
-    const m=data[meal.key]||{photos:[]}; const firstPhoto=m.photos?.[0]??null; const count=m.photos?.length??0;
-    ctx.strokeStyle='#1a1d27'; ctx.lineWidth=3; ctx.strokeRect(x,y,half,half);
-    if (firstPhoto) { await drawCover(ctx,firstPhoto,x,y,half,half); }
-    else { ctx.fillStyle='#12151e'; ctx.fillRect(x,y,half,half); ctx.fillStyle='#2a2d3a'; ctx.font='bold 14px sans-serif'; ctx.textAlign='center'; ctx.fillText('記録なし',x+half/2,y+half/2+5); }
+    const count = dayMeta[meal.key]?.photoCount || 0;
+    ctx.strokeStyle='#d1d1d6'; ctx.lineWidth=3; ctx.strokeRect(x,y,half,half);
+    if (count > 0) {
+      const blob = await idbGet(photoKey(currentDate, meal.key, 0));
+      if (blob) { const url = URL.createObjectURL(blob); await drawCover(ctx, url, x, y, half, half); URL.revokeObjectURL(url); }
+      else { ctx.fillStyle='#f5f5f7'; ctx.fillRect(x,y,half,half); ctx.fillStyle='#8e8e93'; ctx.font='bold 14px sans-serif'; ctx.textAlign='center'; ctx.fillText('記録なし',x+half/2,y+half/2+5); }
+    } else {
+      ctx.fillStyle='#f5f5f7'; ctx.fillRect(x,y,half,half);
+      ctx.fillStyle='#8e8e93'; ctx.font='bold 14px sans-serif'; ctx.textAlign='center'; ctx.fillText('記録なし',x+half/2,y+half/2+5);
+    }
     ctx.fillStyle='rgba(0,0,0,0.55)'; ctx.fillRect(x,y,half,28);
     ctx.fillStyle=colors[i]; ctx.font='bold 13px sans-serif'; ctx.textAlign='left'; ctx.fillText(meal.label,x+8,y+20);
     if (count>1) { ctx.fillStyle='rgba(255,255,255,.85)'; ctx.font='bold 11px sans-serif'; ctx.textAlign='right'; ctx.fillText(`×${count}`,x+half-8,y+20); }
     ctx.textAlign='left';
   }
-  ctx.fillStyle='rgba(255,255,255,.18)'; ctx.font='bold 13px sans-serif'; ctx.textAlign='right'; ctx.fillText(currentDate,size-8,18);
+  ctx.fillStyle='rgba(255,255,255,.8)'; ctx.font='bold 13px sans-serif'; ctx.textAlign='right'; ctx.fillText(currentDate,size-8,size-8);
   const dataUrl = canvas.toDataURL('image/jpeg',.85);
   const preview = document.getElementById('compositePreview');
   preview.src=dataUrl; preview.style.display='block'; preview._dataUrl=dataUrl;
@@ -584,7 +680,7 @@ function generateMarkdown(dates) {
   let md = `# 食事記録 ${dates[0]} 〜 ${dates[6]}\n\n`;
   dates.forEach(date => {
     const data = all[date]; if (!data) return;
-    const hasSomething = MEALS.some(m=>(data[m.key]?.photos?.length||0)>0||data[m.key]?.memo?.trim());
+    const hasSomething = MEALS.some(m=>(data[m.key]?.photoCount||0)>0||data[m.key]?.memo?.trim());
     if (!hasSomething) return;
     md += `## ${fmtDate(date)}\n\n`;
     // ヘルスデータを統合（読み込み済みの場合）
@@ -600,10 +696,10 @@ function generateMarkdown(dates) {
     }
     md += `### 食事記録\n`;
     MEALS.forEach(meal => {
-      const m = data[meal.key]||{}; const photos=m.photos||[]; const memo=m.memo?.trim()||'';
-      if (!photos.length&&!memo) return;
+      const m = data[meal.key]||{}; const photoCount=m.photoCount||0; const memo=m.memo?.trim()||'';
+      if (!photoCount&&!memo) return;
       md += `**${meal.label}**\n`;
-      if (photos.length) md += `- 写真: ${date.replace(/-/g,'')}.jpg${photos.length>1?`（${photos.length}枚）`:''}\n`;
+      if (photoCount) md += `- 写真: ${date.replace(/-/g,'')}.jpg${photoCount>1?`（${photoCount}枚）`:''}\n`;
       if (memo) md += `- ${memo.replace(/\n/g,'\n  ')}\n`;
     });
     md += '\n';
@@ -615,35 +711,37 @@ async function exportWeekZip() {
   const monday=document.getElementById('weekSelect').value; if (!monday) { toast('週を選択してください'); return; }
   const dates=getWeekDates(monday); const all=loadAll(); const zip=new JSZip(); toast('ZIP生成中...');
   for (const date of dates) {
-    const data=all[date]; if (!data) continue;
-    const allPhotos=MEALS.flatMap(m=>data[m.key]?.photos||(data[m.key]?.photo?[data[m.key].photo]:[]));
-    if (!allPhotos.length) continue;
-    // 合成画像
+    const dayMeta=all[date]; if (!dayMeta) continue;
+    const hasPhoto = MEALS.some(m=>(dayMeta[m.key]?.photoCount||0)>0); if (!hasPhoto) continue;
     const size=800,half=400,canvas=document.createElement('canvas'); canvas.width=size; canvas.height=size;
-    const ctx=canvas.getContext('2d'); ctx.fillStyle='#0f1117'; ctx.fillRect(0,0,size,size);
+    const ctx=canvas.getContext('2d'); ctx.fillStyle='#f0f0f0'; ctx.fillRect(0,0,size,size);
     const pos=[{x:0,y:0},{x:half,y:0},{x:0,y:half},{x:half,y:half}];
-    const colors=['#f7934f','#4fbbf7','#6dd68a','#c47ff7'];
+    const colors=['#ff9500','#32ade6','#34c759','#5856d6'];
     for (let i=0;i<MEALS.length;i++) {
-      const meal=MEALS[i]; const {x,y}=pos[i]; const m=data[meal.key]||{}; const photos=m.photos||(m.photo?[m.photo]:[]);
-      ctx.strokeStyle='#1a1d27'; ctx.lineWidth=3; ctx.strokeRect(x,y,half,half);
-      if (photos[0]) { await drawCover(ctx,photos[0],x,y,half,half); }
-      else { ctx.fillStyle='#12151e'; ctx.fillRect(x,y,half,half); ctx.fillStyle='#2a2d3a'; ctx.font='bold 14px sans-serif'; ctx.textAlign='center'; ctx.fillText('記録なし',x+half/2,y+half/2+5); }
+      const meal=MEALS[i]; const {x,y}=pos[i]; const count=dayMeta[meal.key]?.photoCount||0;
+      ctx.strokeStyle='#d1d1d6'; ctx.lineWidth=3; ctx.strokeRect(x,y,half,half);
+      if (count>0) {
+        const blob=await idbGet(photoKey(date,meal.key,0));
+        if (blob) { const url=URL.createObjectURL(blob); await drawCover(ctx,url,x,y,half,half); URL.revokeObjectURL(url); }
+        else { ctx.fillStyle='#f5f5f7'; ctx.fillRect(x,y,half,half); }
+      } else { ctx.fillStyle='#f5f5f7'; ctx.fillRect(x,y,half,half); ctx.fillStyle='#8e8e93'; ctx.font='bold 14px sans-serif'; ctx.textAlign='center'; ctx.fillText('記録なし',x+half/2,y+half/2+5); }
       ctx.fillStyle='rgba(0,0,0,0.55)'; ctx.fillRect(x,y,half,28);
       ctx.fillStyle=colors[i]; ctx.font='bold 13px sans-serif'; ctx.textAlign='left'; ctx.fillText(meal.label,x+8,y+20);
-      if (photos.length>1) { ctx.fillStyle='rgba(255,255,255,.85)'; ctx.font='bold 11px sans-serif'; ctx.textAlign='right'; ctx.fillText(`×${photos.length}`,x+half-8,y+20); }
+      if (count>1) { ctx.fillStyle='rgba(255,255,255,.85)'; ctx.font='bold 11px sans-serif'; ctx.textAlign='right'; ctx.fillText(`×${count}`,x+half-8,y+20); }
       ctx.textAlign='left';
     }
-    ctx.fillStyle='rgba(255,255,255,.18)'; ctx.font='bold 13px sans-serif'; ctx.textAlign='right'; ctx.fillText(date,size-8,18);
+    ctx.fillStyle='rgba(255,255,255,.8)'; ctx.font='bold 13px sans-serif'; ctx.textAlign='right'; ctx.fillText(date,size-8,size-8);
     zip.file(`${date.replace(/-/g,'')}.jpg`, await new Promise(r=>canvas.toBlob(r,'image/jpeg',.85)));
-    // 2枚目以降
     for (const meal of MEALS) {
-      const photos=data[meal.key]?.photos||(data[meal.key]?.photo?[data[meal.key].photo]:[]);
-      for (let idx=1;idx<photos.length;idx++) zip.file(`${date.replace(/-/g,'')}_${meal.key}_${idx+1}.jpg`,photos[idx].split(',')[1],{base64:true});
+      const count=dayMeta[meal.key]?.photoCount||0;
+      for (let idx=1;idx<count;idx++) {
+        const blob=await idbGet(photoKey(date,meal.key,idx));
+        if (blob) zip.file(`${date.replace(/-/g,'')}_${meal.key}_${idx+1}.jpg`,blob);
+      }
     }
   }
-  zip.file('summary.md', generateMarkdown(dates));
-  const blob=await zip.generateAsync({type:'blob'});
-  const end=addDays(monday,6);
+  zip.file('summary.md',generateMarkdown(dates));
+  const blob=await zip.generateAsync({type:'blob'}); const end=addDays(monday,6);
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`meals_${monday.replace(/-/g,'')}_${end.replace(/-/g,'')}.zip`; a.click();
   toast('ZIPをダウンロードしました');
 }
@@ -665,59 +763,89 @@ function renderHistory() {
   if (!dates.length) { list.innerHTML='<div style="color:var(--sub);font-size:13px;">記録はありません</div>'; return; }
   list.innerHTML=dates.map(date => {
     const data=all[date];
-    const dots=MEALS.map(meal=>{
-      const m=data[meal.key]||{}; const hasP=(m.photos?.length||(m.photo?1:0))>0; const hasM=!!m.memo?.trim();
-      return `<span class="history-dot ${hasP?'has-photo':hasM?'has-memo':''}"></span>`;
-    }).join('');
-    const pc=MEALS.reduce((n,m)=>n+(data[m.key]?.photos?.length||(data[m.key]?.photo?1:0)),0);
+    const dots=MEALS.map(meal=>{ const m=data[meal.key]||{}; const hasP=(m.photoCount||0)>0; const hasM=!!m.memo?.trim(); return `<span class="history-dot ${hasP?'has-photo':hasM?'has-memo':''}"></span>`; }).join('');
+    const pc=MEALS.reduce((n,m)=>n+(data[m.key]?.photoCount||0),0);
     const mc=MEALS.filter(m=>data[m.key]?.memo?.trim()).length;
     return `<div class="history-item" onclick="jumpToDate('${date}')"><div><div class="history-date">${fmtDate(date)}</div><div class="history-meta">写真${pc}枚 / メモ${mc}食</div></div><div class="history-dots">${dots}</div></div>`;
   }).join('');
 }
 
-function jumpToDate(date) { saveDay(true); currentDate=date; renderDay(date); }
+async function jumpToDate(date) { saveDay(true); currentDate=date; await renderDay(date); }
 
 // ============================================================
 // バックアップ / 復元
 // ============================================================
-function exportBackup() {
-  const all = loadAll();
-  const keys = Object.keys(all);
+async function exportBackup() {
+  const meta = loadAll(); const keys = Object.keys(meta);
   if (!keys.length) { toast('記録がありません'); return; }
-  const json = JSON.stringify({ version:1, exportedAt: new Date().toISOString(), data: all }, null, 2);
+  toast('バックアップ準備中...');
+  const photos = {};
+  for (const date of keys) {
+    const dayMeta = meta[date];
+    for (const meal of MEALS) {
+      const count = dayMeta[meal.key]?.photoCount || 0;
+      for (let idx = 0; idx < count; idx++) {
+        const key = photoKey(date, meal.key, idx);
+        const blob = await idbGet(key);
+        if (blob) photos[key] = await blobToDataUrl(blob);
+      }
+    }
+  }
+  const json = JSON.stringify({ version:2, exportedAt:new Date().toISOString(), meta, photos }, null, 2);
   const blob = new Blob([json], { type:'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   const dateStr = new Date().toISOString().slice(0,10).replace(/-/g,'');
-  a.href = url; a.download = `hv2_backup_${dateStr}.json`; a.click();
+  a.href=url; a.download=`hv2_backup_${dateStr}.json`; a.click();
   URL.revokeObjectURL(url);
-  document.getElementById('backupInfo').textContent = `${keys.length}日分のデータをエクスポートしました`;
+  document.getElementById('backupInfo').textContent = `${keys.length}日分をエクスポートしました`;
 }
 
 function importBackup(input) {
   const file = input.files[0]; if (!file) return;
   const reader = new FileReader();
-  reader.onload = e => {
+  reader.onload = async e => {
     try {
       const obj = JSON.parse(e.target.result);
-      if (!obj.data || typeof obj.data !== 'object') throw new Error('フォーマットが不正です');
-      const imported = obj.data;
-      const importedKeys = Object.keys(imported);
+      const importedMeta = obj.meta || obj.data;
+      if (!importedMeta || typeof importedMeta !== 'object') throw new Error('フォーマットが不正です');
+      const importedKeys = Object.keys(importedMeta);
       if (!importedKeys.length) { toast('データが空です'); return; }
-      const existing = loadAll();
-      const existingKeys = Object.keys(existing);
+      const existing = loadAll(); const existingKeys = Object.keys(existing);
       const msg = existingKeys.length > 0
         ? `既存の記録（${existingKeys.length}日分）に${importedKeys.length}日分をマージします。同じ日付は上書きされます。よろしいですか？`
         : `${importedKeys.length}日分のデータを読み込みます。よろしいですか？`;
       if (!confirm(msg)) { input.value=''; return; }
-      const merged = { ...existing, ...imported };
-      saveAll(merged);
-      renderDay(currentDate); renderHistory(); updateWeekSelect();
+      // v2: photos in separate obj.photos
+      if (obj.photos) {
+        for (const [key, dataUrl] of Object.entries(obj.photos)) {
+          const res = await fetch(dataUrl); const blob = await res.blob();
+          await idbPut(key, blob);
+        }
+      }
+      // v1: photos embedded in meta (後方互換)
+      for (const [date, dayData] of Object.entries(importedMeta)) {
+        for (const meal of MEALS) {
+          const md = dayData[meal.key]; if (!md) continue;
+          const oldPhotos = md.photos || (md.photo ? [md.photo] : null);
+          if (oldPhotos && oldPhotos.length > 0) {
+            for (let i = 0; i < oldPhotos.length; i++) {
+              if (oldPhotos[i]?.startsWith('data:')) {
+                const res = await fetch(oldPhotos[i]); const blob = await res.blob();
+                await idbPut(photoKey(date, meal.key, i), blob);
+              }
+            }
+            dayData[meal.key] = { photoCount: oldPhotos.length, memo: md.memo||'' };
+          } else if (typeof md.photoCount === 'undefined') {
+            dayData[meal.key] = { photoCount: 0, memo: md.memo||'' };
+          }
+        }
+      }
+      const merged = { ...existing, ...importedMeta }; saveAll(merged);
+      await renderDay(currentDate); renderHistory(); updateWeekSelect();
       document.getElementById('backupInfo').textContent = `${importedKeys.length}日分を読み込みました（合計${Object.keys(merged).length}日）`;
       toast('読み込み完了');
-    } catch(err) {
-      toast('読み込み失敗: ' + err.message);
-    }
+    } catch(err) { toast('読み込み失敗: ' + err.message); }
     input.value='';
   };
   reader.readAsText(file);
@@ -726,14 +854,14 @@ function importBackup(input) {
 // ============================================================
 // 日付ナビ
 // ============================================================
-function navToDate(newDate) {
+async function navToDate(newDate) {
   try { saveDay(true); } catch(e) { console.warn('saveDay on nav:', e); }
-  currentDate = newDate; renderDay(currentDate);
+  currentDate = newDate; await renderDay(currentDate);
 }
 document.getElementById('prevDay').addEventListener('click', ()=>navToDate(addDays(currentDate,-1)));
 document.getElementById('nextDay').addEventListener('click', ()=>navToDate(addDays(currentDate,1)));
 document.getElementById('dateDisplay').addEventListener('click', ()=>{ document.getElementById('datePicker').showPicker?.(); document.getElementById('datePicker').click(); });
-document.getElementById('datePicker').addEventListener('change', e=>{ if(!e.target.value)return; navToDate(e.target.value); });
+document.getElementById('datePicker').addEventListener('change', async e => { if(!e.target.value) return; await navToDate(e.target.value); });
 
 // ============================================================
 // ヘルスデータタブ（health_viewer1 統合・hv_ プレフィックス）
@@ -1100,7 +1228,10 @@ function hvTick() { return new Promise(r=>setTimeout(r,30)); }
 // 初期化
 // ============================================================
 buildMealGrid();
-renderDay(currentDate);
+(async () => {
+  await migratePhotos();
+  await renderDay(currentDate);
+})();
 </script>
 </body>
 </html>
