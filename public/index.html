@@ -173,6 +173,9 @@ tr:last-child td { border-bottom:none; }
     <input type="date" id="datePicker">
   </div>
 
+  <!-- ヘルスデータサマリー（読み込み済み時のみ表示） -->
+  <div id="healthSummaryBar" style="display:none;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:8px 12px;margin:8px 16px 0;font-size:12px;color:var(--sub);line-height:1.8;"></div>
+
   <div class="tab-main">
     <div class="meal-grid" id="mealGrid"></div>
 
@@ -495,6 +498,22 @@ async function renderDay(date) {
   MEALS.forEach(meal => { document.getElementById(`memo-${meal.key}`).value = data[meal.key].memo || ''; });
   for (const meal of MEALS) { await renderPhotoStrip(meal.key); }
   updateComposite(); renderHistory(); updateWeekSelect();
+  renderHealthSummaryBar(date);
+}
+
+function renderHealthSummaryBar(date) {
+  const bar = document.getElementById('healthSummaryBar');
+  const hd = hvDayMap[date];
+  if (!hd) { bar.style.display = 'none'; return; }
+  const parts = [];
+  if (hd.weight !== null) parts.push(`体重: <b>${hd.weight.toFixed(1)}</b> kg`);
+  if (hd.bodyFat !== null) parts.push(`体脂肪: <b>${hd.bodyFat.toFixed(1)}</b>%`);
+  if (hd.steps > 0) parts.push(`歩数: <b>${hd.steps.toLocaleString()}</b> 歩`);
+  if (hd.activeCalories > 0) parts.push(`消費: <b>${Math.round(hd.activeCalories).toLocaleString()}</b> kcal`);
+  if (hd.hasSleep) parts.push(`睡眠: <b>${hd.sleep.toFixed(1)}</b> h`);
+  if (parts.length === 0) { bar.style.display = 'none'; return; }
+  bar.innerHTML = parts.join(' &nbsp;|&nbsp; ');
+  bar.style.display = 'block';
 }
 
 // ============================================================
@@ -709,6 +728,97 @@ function generateMarkdown(dates) {
   return md;
 }
 
+function generateAiPrompt(dates, monday) {
+  const end = addDays(monday, 6);
+  const all = loadAll();
+  // 写真・メモがある日だけ列挙
+  const activeDates = dates.filter(d => {
+    const data = all[d]; if (!data) return false;
+    return MEALS.some(m => (data[m.key]?.photoCount||0)>0 || data[m.key]?.memo?.trim());
+  });
+  const photoFiles = [];
+  activeDates.forEach(date => {
+    const data = all[date]; if (!data) return;
+    MEALS.forEach(meal => {
+      const count = data[meal.key]?.photoCount || 0;
+      if (count === 0) return;
+      // 合成画像（インデックス0の代替として日付合成JPG）
+      photoFiles.push(`${date.replace(/-/g,'')}.jpg（${meal.label}）`);
+    });
+  });
+  // ヘルスデータサマリー（読み込み済みの場合）
+  let healthSection = '';
+  if (hvSortedDates.length > 0) {
+    const weekDates = dates.filter(d => hvDayMap[d]);
+    if (weekDates.length > 0) {
+      const rows = weekDates.map(d => {
+        const h = hvDayMap[d];
+        return `| ${d} | ${h.weight!==null?h.weight.toFixed(1):'—'} | ${h.bodyFat!==null?h.bodyFat.toFixed(1):'—'} | ${h.steps>0?h.steps.toLocaleString():'—'} | ${h.activeCalories>0?Math.round(h.activeCalories):'—'} | ${h.hasSleep?h.sleep.toFixed(1):'—'} |`;
+      }).join('\n');
+      healthSection = `\n## 週間ヘルスデータ\n\n| 日付 | 体重(kg) | 体脂肪(%) | 歩数 | 消費(kcal) | 睡眠(h) |\n|---|---|---|---|---|---|\n${rows}\n`;
+    }
+  }
+
+  const photoListText = photoFiles.length > 0
+    ? photoFiles.map(f => `- ${f}`).join('\n')
+    : '（写真なし）';
+
+  return `# 食事写真 栄養分析依頼
+
+## 期間
+${monday} 〜 ${end}
+
+## 添付ファイル
+以下の画像ファイルが同梱されています。
+${photoListText}
+${healthSection}
+## 記録内容
+同梱の summary.md に各日の食事メモが記載されています。
+
+---
+
+## 分析依頼
+
+以下の手順で栄養分析を行ってください。
+
+### Step 1: 食品の特定
+各画像から食事内容を特定し、食品名・推定量（g）をリストアップしてください。
+
+### Step 2: 栄養素テーブル（食事ごと）
+各食事について以下の形式で表を作成してください。
+
+| 食品名 | 量(g) | カロリー(kcal) | タンパク質(g) | 脂質(g) | 炭水化物(g) |
+|---|---|---|---|---|---|
+
+### Step 3: 日別集計
+各日の合計を集計してください。
+
+| 日付 | カロリー | P(g) | F(g) | C(g) | PFCバランス |
+|---|---|---|---|---|---|
+
+目標カロリー: 2,000 kcal
+目標PFC比率: P=15% / F=25% / C=60%
+（PFCバランスは上記目標との比較で評価してください）
+
+### Step 4: 週間サマリー
+週全体の平均を算出し、目標達成率（カロリー・PFCバランス）を評価してください。
+
+### Step 5: 栄養アドバイス
+以下の形式でアドバイスを提供してください。
+
+**総合スコア: XX / 100**
+
+【良かった点】
+- ...
+
+【改善ポイント】
+- ...
+
+【来週のアドバイス】
+- ...
+`;
+}
+
 async function exportWeekZip() {
   const monday=document.getElementById('weekSelect').value; if (!monday) { toast('週を選択してください'); return; }
   const dates=getWeekDates(monday); const all=loadAll(); const zip=new JSZip(); toast('ZIP生成中...');
@@ -743,6 +853,7 @@ async function exportWeekZip() {
     }
   }
   zip.file('summary.md',generateMarkdown(dates));
+  zip.file('ai_prompt.md',generateAiPrompt(dates, monday));
   const blob=await zip.generateAsync({type:'blob'}); const end=addDays(monday,6);
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`meals_${monday.replace(/-/g,'')}_${end.replace(/-/g,'')}.zip`; a.click();
   toast('ZIPをダウンロードしました');
@@ -936,6 +1047,9 @@ async function hvProcessFile(file) {
     await new Promise(r=>setTimeout(r,600));
     hvSetProgress(false);
     hvRenderAll();
+    // 永続化（次回起動時に復元）
+    try { localStorage.setItem('hv2_health', JSON.stringify({dates:hvSortedDates, map:hvDayMap, has:hvHas})); } catch(e) {}
+    renderHealthSummaryBar(currentDate);
     toast(`ヘルスデータ読み込み完了（${hvSortedDates.length}日分）`);
   } catch(err) {
     hvSetProgress(false);
@@ -1249,6 +1363,20 @@ function hvTick() { return new Promise(r=>setTimeout(r,30)); }
 // ============================================================
 buildMealGrid();
 (async () => {
+  // 保存済みヘルスデータの復元
+  try {
+    const savedHealth = localStorage.getItem('hv2_health');
+    if (savedHealth) {
+      const h = JSON.parse(savedHealth);
+      if (h.dates && h.dates.length > 0 && h.map) {
+        hvDayMap = h.map;
+        hvSortedDates = h.dates;
+        hvHas = Object.assign(hvHas, h.has || {});
+        hvRenderAll();
+      }
+    }
+  } catch(e) { console.warn('hv2_health 復元エラー:', e); }
+
   await migratePhotos();
   await renderDay(currentDate);
 })();
