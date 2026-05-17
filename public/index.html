@@ -684,15 +684,15 @@ function downloadComposite() {
 // ============================================================
 // 週次エクスポート
 // ============================================================
-function getMonday(str) {
-  const d=new Date(str); const diff=d.getDay()===0?-6:1-d.getDay(); d.setDate(d.getDate()+diff);
+function getSunday(str) {
+  const d=new Date(str); d.setDate(d.getDate()-d.getDay()); // 日曜日へ戻す（0=日曜なのでそのまま）
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 }
-function getWeekDates(mon) { return Array.from({length:7},(_,i)=>addDays(mon,i)); }
+function getWeekDates(sun) { return Array.from({length:7},(_,i)=>addDays(sun,i)); }
 
 function updateWeekSelect() {
   const sel=document.getElementById('weekSelect'); const all=loadAll();
-  const weeks=new Set(Object.keys(all).map(getMonday)); weeks.add(getMonday(currentDate));
+  const weeks=new Set(Object.keys(all).map(getSunday)); weeks.add(getSunday(currentDate));
   sel.innerHTML=Array.from(weeks).sort().reverse().map(w=>`<option value="${w}">${w} 〜 ${addDays(w,6)}</option>`).join('');
 }
 
@@ -728,8 +728,8 @@ function generateMarkdown(dates) {
   return md;
 }
 
-function generateAiPrompt(dates, monday) {
-  const end = addDays(monday, 6);
+function generateAiPrompt(dates, sunday) {
+  const end = addDays(sunday, 6);
   const all = loadAll();
   // 写真・メモがある日だけ列挙
   const activeDates = dates.filter(d => {
@@ -765,7 +765,7 @@ function generateAiPrompt(dates, monday) {
 
   const hasHealth = healthSection.length > 0;
 
-  return `# 週間食事栄養分析 ${monday} 〜 ${end}
+  return `# 週間食事栄養分析 ${sunday} 〜 ${end}
 
 ## 出力形式について
 **分析結果はすべてMarkdown形式で出力してください。**
@@ -837,8 +837,8 @@ ${hasHealth ? `
 }
 
 async function exportWeekZip() {
-  const monday=document.getElementById('weekSelect').value; if (!monday) { toast('週を選択してください'); return; }
-  const dates=getWeekDates(monday); const all=loadAll(); const zip=new JSZip(); toast('ZIP生成中...');
+  const sunday=document.getElementById('weekSelect').value; if (!sunday) { toast('週を選択してください'); return; }
+  const dates=getWeekDates(sunday); const all=loadAll(); const zip=new JSZip(); toast('ZIP生成中...');
   for (const date of dates) {
     const dayMeta=all[date]; if (!dayMeta) continue;
     const hasPhoto = MEALS.some(m=>(dayMeta[m.key]?.photoCount||0)>0); if (!hasPhoto) continue;
@@ -870,9 +870,9 @@ async function exportWeekZip() {
     }
   }
   zip.file('summary.md',generateMarkdown(dates));
-  zip.file('ai_prompt.md',generateAiPrompt(dates, monday));
-  const blob=await zip.generateAsync({type:'blob'}); const end=addDays(monday,6);
-  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`meals_${monday.replace(/-/g,'')}_${end.replace(/-/g,'')}.zip`; a.click();
+  zip.file('ai_prompt.md',generateAiPrompt(dates, sunday));
+  const blob=await zip.generateAsync({type:'blob'}); const end=addDays(sunday,6);
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`meals_${sunday.replace(/-/g,'')}_${end.replace(/-/g,'')}.zip`; a.click();
   toast('ZIPをダウンロードしました');
 }
 
