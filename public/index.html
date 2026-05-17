@@ -206,6 +206,17 @@ tr:last-child td { border-bottom:none; }
       <div class="section-title">過去の記録</div>
       <div class="history-list" id="historyList"></div>
     </div>
+
+    <div class="section-card">
+      <div class="section-title">データのバックアップ / 復元</div>
+      <p class="export-info">全記録（写真・メモ）をJSONファイルとして書き出し・読み込みできます。端末移行やブラウザリセット前のバックアップに使用してください。</p>
+      <div class="row-actions">
+        <button class="btn btn-secondary btn-sm" onclick="exportBackup()">バックアップ書き出し</button>
+        <button class="btn btn-secondary btn-sm" onclick="document.getElementById('backupFileInput').click()">バックアップ読み込み</button>
+        <input type="file" id="backupFileInput" accept=".json" style="display:none" onchange="importBackup(this)">
+      </div>
+      <div id="backupInfo" style="font-size:12px;color:var(--sub);margin-top:8px;"></div>
+    </div>
   </div>
 </div>
 
@@ -657,6 +668,52 @@ function renderHistory() {
 }
 
 function jumpToDate(date) { saveDay(true); currentDate=date; renderDay(date); }
+
+// ============================================================
+// バックアップ / 復元
+// ============================================================
+function exportBackup() {
+  const all = loadAll();
+  const keys = Object.keys(all);
+  if (!keys.length) { toast('記録がありません'); return; }
+  const json = JSON.stringify({ version:1, exportedAt: new Date().toISOString(), data: all }, null, 2);
+  const blob = new Blob([json], { type:'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const dateStr = new Date().toISOString().slice(0,10).replace(/-/g,'');
+  a.href = url; a.download = `hv2_backup_${dateStr}.json`; a.click();
+  URL.revokeObjectURL(url);
+  document.getElementById('backupInfo').textContent = `${keys.length}日分のデータをエクスポートしました`;
+}
+
+function importBackup(input) {
+  const file = input.files[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const obj = JSON.parse(e.target.result);
+      if (!obj.data || typeof obj.data !== 'object') throw new Error('フォーマットが不正です');
+      const imported = obj.data;
+      const importedKeys = Object.keys(imported);
+      if (!importedKeys.length) { toast('データが空です'); return; }
+      const existing = loadAll();
+      const existingKeys = Object.keys(existing);
+      const msg = existingKeys.length > 0
+        ? `既存の記録（${existingKeys.length}日分）に${importedKeys.length}日分をマージします。同じ日付は上書きされます。よろしいですか？`
+        : `${importedKeys.length}日分のデータを読み込みます。よろしいですか？`;
+      if (!confirm(msg)) { input.value=''; return; }
+      const merged = { ...existing, ...imported };
+      saveAll(merged);
+      renderDay(currentDate); renderHistory(); updateWeekSelect();
+      document.getElementById('backupInfo').textContent = `${importedKeys.length}日分を読み込みました（合計${Object.keys(merged).length}日）`;
+      toast('読み込み完了');
+    } catch(err) {
+      toast('読み込み失敗: ' + err.message);
+    }
+    input.value='';
+  };
+  reader.readAsText(file);
+}
 
 // ============================================================
 // 日付ナビ
