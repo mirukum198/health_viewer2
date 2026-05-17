@@ -644,12 +644,12 @@ function drawCover(ctx, dataUrl, x, y, w, h) {
   return new Promise(resolve => {
     const img=new Image();
     img.onload=()=>{
-      const s=Math.max(w/img.naturalWidth,h/img.naturalHeight);
+      // contain: 縦横比を保ったまま全体をセル内に収める
+      const s=Math.min(w/img.naturalWidth,h/img.naturalHeight);
       const sw=img.naturalWidth*s, sh=img.naturalHeight*s;
-      ctx.save();
-      ctx.beginPath(); ctx.rect(x,y,w,h); ctx.clip();
+      ctx.fillStyle='#f0f0f0';
+      ctx.fillRect(x,y,w,h);
       ctx.drawImage(img,x+(w-sw)/2,y+(h-sh)/2,sw,sh);
-      ctx.restore();
       resolve();
     };
     img.src=dataUrl;
