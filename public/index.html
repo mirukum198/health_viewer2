@@ -214,6 +214,9 @@ tr:last-child td { border-bottom:none; }
         <button class="btn btn-secondary btn-sm" onclick="document.getElementById('backupFileInput').click()">バックアップ読み込み</button>
         <input type="file" id="backupFileInput" accept=".json" style="display:none" onchange="importBackup(this)">
       </div>
+      <div class="row-actions" style="margin-top:8px;">
+        <button class="btn btn-sm" style="background:#ff3b30;color:#fff;" onclick="deleteAllData()">全データ削除</button>
+      </div>
       <div id="backupInfo" style="font-size:12px;color:var(--sub);margin-top:8px;"></div>
     </div>
   </div>
@@ -546,7 +549,7 @@ async function removePhoto(mealKey, idx) {
   await renderPhotoStrip(mealKey); updateComposite();
 }
 
-async function compressImageToBlob(file, maxW=900, quality=0.78) {
+async function compressImageToBlob(file, maxW=640, quality=0.72) {
   return new Promise(resolve => {
     const img = new Image(), url = URL.createObjectURL(file);
     img.onload = () => {
@@ -607,7 +610,7 @@ function updateComposite() {
 
 async function generateComposite() {
   const all = loadAll(); const dayMeta = all[currentDate] || {};
-  const size=800, half=400;
+  const size=1024, half=512;
   const canvas = document.createElement('canvas'); canvas.width=size; canvas.height=size;
   const ctx = canvas.getContext('2d');
   ctx.fillStyle='#f0f0f0'; ctx.fillRect(0,0,size,size);
@@ -631,7 +634,7 @@ async function generateComposite() {
     ctx.textAlign='left';
   }
   ctx.fillStyle='rgba(255,255,255,.8)'; ctx.font='bold 13px sans-serif'; ctx.textAlign='right'; ctx.fillText(currentDate,size-8,size-8);
-  const dataUrl = canvas.toDataURL('image/jpeg',.85);
+  const dataUrl = canvas.toDataURL('image/jpeg',.80);
   const preview = document.getElementById('compositePreview');
   preview.src=dataUrl; preview.style.display='block'; preview._dataUrl=dataUrl;
   document.getElementById('noPhotoMsg').style.display='none';
@@ -712,7 +715,7 @@ async function exportWeekZip() {
   for (const date of dates) {
     const dayMeta=all[date]; if (!dayMeta) continue;
     const hasPhoto = MEALS.some(m=>(dayMeta[m.key]?.photoCount||0)>0); if (!hasPhoto) continue;
-    const size=800,half=400,canvas=document.createElement('canvas'); canvas.width=size; canvas.height=size;
+    const size=1024,half=512,canvas=document.createElement('canvas'); canvas.width=size; canvas.height=size;
     const ctx=canvas.getContext('2d'); ctx.fillStyle='#f0f0f0'; ctx.fillRect(0,0,size,size);
     const pos=[{x:0,y:0},{x:half,y:0},{x:0,y:half},{x:half,y:half}];
     const colors=['#ff9500','#32ade6','#34c759','#5856d6'];
@@ -730,7 +733,7 @@ async function exportWeekZip() {
       ctx.textAlign='left';
     }
     ctx.fillStyle='rgba(255,255,255,.8)'; ctx.font='bold 13px sans-serif'; ctx.textAlign='right'; ctx.fillText(date,size-8,size-8);
-    zip.file(`${date.replace(/-/g,'')}.jpg`, await new Promise(r=>canvas.toBlob(r,'image/jpeg',.85)));
+    zip.file(`${date.replace(/-/g,'')}.jpg`, await new Promise(r=>canvas.toBlob(r,'image/jpeg',.80)));
     for (const meal of MEALS) {
       const count=dayMeta[meal.key]?.photoCount||0;
       for (let idx=1;idx<count;idx++) {
@@ -798,6 +801,24 @@ async function exportBackup() {
   a.href=url; a.download=`hv2_backup_${dateStr}.json`; a.click();
   URL.revokeObjectURL(url);
   document.getElementById('backupInfo').textContent = `${keys.length}日分をエクスポートしました`;
+}
+
+async function deleteAllData() {
+  const all = loadAll(); const days = Object.keys(all);
+  if (!days.length) { toast('削除するデータがありません'); return; }
+  if (!confirm(`全記録（${days.length}日分）と写真をすべて削除します。この操作は元に戻せません。よろしいですか？`)) return;
+  // IndexedDB全削除
+  const db = await getDB();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).clear();
+    tx.oncomplete = resolve; tx.onerror = e => reject(e.target.error);
+  });
+  // localStorage全削除
+  localStorage.removeItem(STORAGE_KEY);
+  await renderDay(currentDate); renderHistory(); updateWeekSelect();
+  document.getElementById('backupInfo').textContent = `${days.length}日分のデータを削除しました`;
+  toast('全データを削除しました');
 }
 
 function importBackup(input) {
