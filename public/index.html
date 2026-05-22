@@ -921,7 +921,9 @@ async function exportBackup() {
       }
     }
   }
-  const json = JSON.stringify({ version:2, exportedAt:new Date().toISOString(), meta, photos }, null, 2);
+  const healthRaw = localStorage.getItem('hv2_health');
+  const health = healthRaw ? JSON.parse(healthRaw) : null;
+  const json = JSON.stringify({ version:2, exportedAt:new Date().toISOString(), meta, photos, health }, null, 2);
   const blob = new Blob([json], { type:'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -990,8 +992,17 @@ function importBackup(input) {
         }
       }
       const merged = { ...existing, ...importedMeta }; saveAll(merged);
+      if (obj.health && obj.health.map && obj.health.dates) {
+        localStorage.setItem('hv2_health', JSON.stringify(obj.health));
+        hvDayMap = obj.health.map;
+        hvSortedDates = obj.health.dates;
+        hvHas = Object.assign(hvHas, obj.health.has || {});
+        hvRenderAll();
+        renderHealthSummaryBar(currentDate);
+      }
       await renderDay(currentDate); renderHistory(); updateWeekSelect();
-      document.getElementById('backupInfo').textContent = `${importedKeys.length}日分を読み込みました（合計${Object.keys(merged).length}日）`;
+      const healthMsg = obj.health ? `・ヘルスデータ${obj.health.dates.length}日分` : '';
+      document.getElementById('backupInfo').textContent = `${importedKeys.length}日分を読み込みました（合計${Object.keys(merged).length}日）${healthMsg}`;
       toast('読み込み完了');
     } catch(err) { toast('読み込み失敗: ' + err.message); }
     input.value='';
