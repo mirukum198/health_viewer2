@@ -463,6 +463,7 @@ async function migratePhotos() {
 // ============================================================
 // 食事タブ: UI構築・描画
 // ============================================================
+let weekStartMonday = localStorage.getItem('hv2_weekStartMonday') === '1';
 let currentWeekStart = getWeekStart(todayStr());
 
 function buildWeekGrid(sunday) {
@@ -738,8 +739,6 @@ function drawCover(ctx, dataUrl, x, y, w, h) {
 // ============================================================
 // 週次エクスポート
 // ============================================================
-let weekStartMonday = localStorage.getItem('hv2_weekStartMonday') === '1';
-
 function getWeekStart(str) {
   const d = new Date(str);
   const day = d.getDay(); // 0=日, 1=月...
