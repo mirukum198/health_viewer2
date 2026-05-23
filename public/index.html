@@ -26,13 +26,21 @@ header h1 { font-size:15px; font-weight:700; color:var(--accent); }
 .tab-content { display:none; }
 .tab-content.active { display:block; }
 
-/* ===== 日付ナビ（食事タブ） ===== */
-.date-nav { display:flex; align-items:center; gap:8px; background:var(--card); padding:9px 16px; border-bottom:1px solid var(--border); }
-.date-nav button { background:var(--border); border:none; color:var(--text); padding:5px 12px; border-radius:6px; cursor:pointer; font-size:14px; }
-.date-nav button:hover { background:#c7c7cc; }
-#dateDisplay { flex:1; text-align:center; font-weight:600; font-size:15px; cursor:pointer; }
-#dateDisplay:hover { color:var(--accent); }
+/* ===== 週ナビ（食事タブ） ===== */
+.week-nav { display:flex; align-items:center; gap:8px; background:var(--card); padding:9px 16px; border-bottom:1px solid var(--border); }
+.week-nav button { background:var(--border); border:none; color:var(--text); padding:5px 12px; border-radius:6px; cursor:pointer; font-size:14px; }
+.week-nav button:hover { background:#c7c7cc; }
+#weekDisplay { flex:1; text-align:center; font-weight:600; font-size:14px; cursor:pointer; }
+#weekDisplay:hover { color:var(--accent); }
 #datePicker { position:absolute; opacity:0; pointer-events:none; width:0; }
+.week-day-section { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:14px; box-shadow:0 1px 4px rgba(0,0,0,.06); }
+.week-day-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; padding-bottom:8px; border-bottom:1px solid var(--border); }
+.week-day-title { font-size:14px; font-weight:700; }
+.week-day-today { color:var(--accent); }
+.week-health-bar { font-size:12px; color:var(--sub); line-height:1.8; margin-bottom:8px; padding:6px 8px; background:var(--card2); border-radius:6px; }
+.day-composite-wrap { margin-top:10px; display:flex; align-items:flex-start; gap:10px; flex-wrap:wrap; }
+.day-composite-wrap img { width:160px; height:160px; object-fit:cover; border-radius:8px; border:1px solid var(--border); display:block; }
+.day-composite-actions { display:flex; flex-direction:column; gap:6px; }
 
 /* ===== 共通レイアウト ===== */
 .tab-main { max-width:720px; margin:0 auto; padding:14px; }
@@ -72,9 +80,12 @@ header h1 { font-size:15px; font-weight:700; color:var(--accent); }
 .photo-thumb-remove { position:absolute; top:2px; right:2px; background:rgba(0,0,0,.7); border:none; color:#fff; border-radius:4px; width:18px; height:18px; font-size:11px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
 .photo-thumb-remove:hover { background:rgba(220,50,50,.85); }
 .photo-input { display:none; }
-.memo-area { padding:8px 10px; }
-.memo-area textarea { width:100%; background:transparent; border:none; color:var(--text); font-size:13px; resize:none; outline:none; min-height:44px; line-height:1.5; }
+.memo-area { padding:8px 10px; position:relative; }
+.memo-area textarea { width:100%; background:transparent; border:none; color:var(--text); font-size:13px; resize:none; outline:none; min-height:44px; line-height:1.5; padding-right:52px; }
 .memo-area textarea::placeholder { color:var(--sub); }
+@media (max-width:768px) { .memo-area textarea { font-size:16px; } }
+.memo-copy-btn { position:absolute; top:10px; right:12px; background:var(--border); border:none; color:var(--sub); font-size:11px; cursor:pointer; padding:3px 7px; border-radius:5px; transition:background .15s,color .15s; }
+.memo-copy-btn:hover { background:#c7c7cc; color:var(--text); }
 
 /* ===== 合成プレビュー / エクスポート ===== */
 #compositePreview { width:100%; border-radius:8px; display:none; }
@@ -166,32 +177,15 @@ tr:last-child td { border-bottom:none; }
      TAB 1: 食事記録
      ====================================================== -->
 <div id="tab-meals" class="tab-content active">
-  <div class="date-nav">
-    <button id="prevDay">&#8592;</button>
-    <div id="dateDisplay">-</div>
-    <button id="nextDay">&#8594;</button>
+  <div class="week-nav">
+    <button id="prevWeek">&#8592;</button>
+    <div id="weekDisplay">-</div>
+    <button id="nextWeek">&#8594;</button>
     <input type="date" id="datePicker">
   </div>
 
-  <!-- ヘルスデータサマリー（読み込み済み時のみ表示） -->
-  <div id="healthSummaryBar" style="display:none;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:8px 12px;margin:8px 16px 0;font-size:12px;color:var(--sub);line-height:1.8;"></div>
-
   <div class="tab-main">
-    <div class="meal-grid" id="mealGrid"></div>
-
-    <div style="display:flex;gap:8px;margin-bottom:12px;">
-      <button class="btn btn-secondary" onclick="clearDay()">この日をクリア</button>
-    </div>
-
-    <div class="section-card">
-      <div class="section-title">1日合成プレビュー</div>
-      <img id="compositePreview" alt="合成画像">
-      <div id="noPhotoMsg">写真を追加すると合成プレビューが表示されます</div>
-      <div class="row-actions">
-        <button class="btn btn-secondary btn-sm" onclick="generateComposite()">合成を更新</button>
-        <button class="btn btn-secondary btn-sm" onclick="downloadComposite()">合成画像をDL</button>
-      </div>
-    </div>
+    <div id="weekGrid"></div>
 
     <div class="section-card">
       <div class="section-title">週次エクスポート</div>
@@ -466,43 +460,90 @@ async function migratePhotos() {
 // ============================================================
 // 食事タブ: UI構築・描画
 // ============================================================
-let currentDate = todayStr();
+let currentWeekSunday = getSunday(todayStr());
 
-function buildMealGrid() {
-  const grid = document.getElementById('mealGrid');
+function buildWeekGrid(sunday) {
+  const weekGrid = document.getElementById('weekGrid');
+  weekGrid.innerHTML = '';
+  const dates = getWeekDates(sunday);
+  const today = todayStr();
+  dates.forEach(date => {
+    const section = document.createElement('div');
+    section.className = 'week-day-section';
+    section.id = `day-section-${date}`;
+    const isToday = date === today;
+    section.innerHTML = `
+      <div class="week-day-header">
+        <span class="week-day-title${isToday ? ' week-day-today' : ''}">${fmtDate(date)}</span>
+        <button class="btn btn-secondary btn-sm" onclick="clearDay('${date}')">クリア</button>
+      </div>
+      <div class="week-health-bar" id="healthSummaryBar-${date}" style="display:none;"></div>
+      <div class="meal-grid" id="mealGrid-${date}"></div>
+      <div class="day-composite-wrap" id="compositeWrap-${date}" style="display:none;">
+        <img id="compositeImg-${date}" alt="合成プレビュー">
+        <div class="day-composite-actions">
+          <button class="btn btn-secondary btn-sm" onclick="downloadComposite('${date}')">合成画像をDL</button>
+        </div>
+      </div>
+    `;
+    weekGrid.appendChild(section);
+    buildMealCards(date);
+  });
+}
+
+function buildMealCards(date) {
+  const grid = document.getElementById(`mealGrid-${date}`);
+  if (!grid) return;
   grid.innerHTML = '';
   MEALS.forEach(meal => {
     const card = document.createElement('div');
-    card.className = 'meal-card'; card.id = `card-${meal.key}`;
+    card.className = 'meal-card'; card.id = `card-${date}-${meal.key}`;
     card.innerHTML = `
       <div class="meal-card-header">
         <div class="meal-label"><span class="meal-dot ${meal.dotClass}"></span>${meal.label}</div>
-        <span class="photo-count-badge" id="badge-${meal.key}"></span>
+        <span class="photo-count-badge" id="badge-${date}-${meal.key}"></span>
       </div>
-      <div class="photo-strip" id="strip-${meal.key}">
-        <button class="photo-add-btn" id="addBtn-${meal.key}" onclick="triggerPhoto('${meal.key}')">+</button>
-        <input type="file" class="photo-input" id="photoInput-${meal.key}" accept="image/*"
-          onchange="handlePhoto('${meal.key}',this)">
+      <div class="photo-strip" id="strip-${date}-${meal.key}">
+        <button class="photo-add-btn" id="addBtn-${date}-${meal.key}" onclick="triggerPhoto('${date}','${meal.key}')">+</button>
+        <input type="file" class="photo-input" id="photoInput-${date}-${meal.key}" accept="image/*"
+          onchange="handlePhoto('${date}','${meal.key}',this)">
       </div>
       <div class="memo-area">
-        <textarea id="memo-${meal.key}" placeholder="${meal.label}のメモ" rows="2" oninput="autoSave()"></textarea>
+        <textarea id="memo-${date}-${meal.key}" data-date="${date}" placeholder="${meal.label}のメモ" rows="2" oninput="autoSave(this)"></textarea>
+        <button class="memo-copy-btn" id="copyBtn-${date}-${meal.key}" onclick="copyMemo('${date}','${meal.key}')">コピー</button>
       </div>`;
     grid.appendChild(card);
   });
 }
 
-async function renderDay(date) {
-  document.getElementById('dateDisplay').textContent = fmtDate(date);
-  document.getElementById('datePicker').value = date;
-  const data = loadDayData(date);
-  MEALS.forEach(meal => { document.getElementById(`memo-${meal.key}`).value = data[meal.key].memo || ''; });
-  for (const meal of MEALS) { await renderPhotoStrip(meal.key); }
-  updateComposite(); renderHistory(); updateWeekSelect();
-  renderHealthSummaryBar(date);
+async function renderWeek(sunday) {
+  currentWeekSunday = sunday;
+  const dates = getWeekDates(sunday);
+  const end = dates[6];
+  document.getElementById('weekDisplay').textContent =
+    `${parseInt(sunday.slice(5,7))}/${parseInt(sunday.slice(8,10))} 〜 ${parseInt(end.slice(5,7))}/${parseInt(end.slice(8,10))}`;
+  document.getElementById('datePicker').value = sunday;
+  buildWeekGrid(sunday);
+  for (const date of dates) {
+    const data = loadDayData(date);
+    MEALS.forEach(meal => {
+      const el = document.getElementById(`memo-${date}-${meal.key}`);
+      if (el) el.value = data[meal.key].memo || '';
+    });
+    await renderAllPhotoStrips(date);
+    updateComposite(date);
+    renderHealthSummaryBar(date);
+  }
+  renderHistory(); updateWeekSelect();
+}
+
+async function renderAllPhotoStrips(date) {
+  for (const meal of MEALS) { await renderPhotoStrip(date, meal.key); }
 }
 
 function renderHealthSummaryBar(date) {
-  const bar = document.getElementById('healthSummaryBar');
+  const bar = document.getElementById(`healthSummaryBar-${date}`);
+  if (!bar) return;
   const hd = hvDayMap[date];
   if (!hd) { bar.style.display = 'none'; return; }
   const parts = [];
@@ -516,56 +557,62 @@ function renderHealthSummaryBar(date) {
   bar.style.display = 'block';
 }
 
+function refreshWeekHealthBars() {
+  getWeekDates(currentWeekSunday).forEach(date => renderHealthSummaryBar(date));
+}
+
 // ============================================================
 // 写真ストリップ
 // ============================================================
-function triggerPhoto(mealKey) { const inp = document.getElementById(`photoInput-${mealKey}`); inp.value=''; inp.click(); }
+function triggerPhoto(date, mealKey) { const inp = document.getElementById(`photoInput-${date}-${mealKey}`); inp.value=''; inp.click(); }
 
-async function handlePhoto(mealKey, input) {
+async function handlePhoto(date, mealKey, input) {
   if (!input.files||!input.files[0]) return;
-  const countCheck = loadAll()[currentDate]?.[mealKey]?.photoCount || 0;
+  const countCheck = loadAll()[date]?.[mealKey]?.photoCount || 0;
   if (countCheck >= MAX_PHOTOS) { toast(`写真は最大${MAX_PHOTOS}枚です`); return; }
   const blob = await compressImageToBlob(input.files[0]);
   const all = loadAll();
-  if (!all[currentDate]) all[currentDate] = emptyDay();
-  if (!all[currentDate][mealKey]) all[currentDate][mealKey] = { photoCount:0, memo:'' };
-  const count = all[currentDate][mealKey].photoCount || 0;
+  if (!all[date]) all[date] = emptyDay();
+  if (!all[date][mealKey]) all[date][mealKey] = { photoCount:0, memo:'' };
+  const count = all[date][mealKey].photoCount || 0;
   if (count >= MAX_PHOTOS) { toast(`写真は最大${MAX_PHOTOS}枚です`); return; }
-  await idbPut(photoKey(currentDate, mealKey, count), blob);
-  all[currentDate][mealKey].photoCount = count + 1;
+  await idbPut(photoKey(date, mealKey, count), blob);
+  all[date][mealKey].photoCount = count + 1;
   saveAll(all);
-  await renderPhotoStrip(mealKey);
-  updateComposite();
+  await renderPhotoStrip(date, mealKey);
+  updateComposite(date);
 }
 
-async function renderPhotoStrip(mealKey) {
-  const count = loadAll()[currentDate]?.[mealKey]?.photoCount || 0;
-  const strip = document.getElementById(`strip-${mealKey}`);
-  const addBtn = document.getElementById(`addBtn-${mealKey}`);
-  const badge  = document.getElementById(`badge-${mealKey}`);
+async function renderPhotoStrip(date, mealKey) {
+  const count = loadAll()[date]?.[mealKey]?.photoCount || 0;
+  const strip = document.getElementById(`strip-${date}-${mealKey}`);
+  const addBtn = document.getElementById(`addBtn-${date}-${mealKey}`);
+  const badge  = document.getElementById(`badge-${date}-${mealKey}`);
+  if (!strip) return;
   strip.querySelectorAll('.photo-thumb img').forEach(img => { if (img.src.startsWith('blob:')) URL.revokeObjectURL(img.src); });
   strip.querySelectorAll('.photo-thumb').forEach(el => el.remove());
   for (let idx = 0; idx < count; idx++) {
-    const blob = await idbGet(photoKey(currentDate, mealKey, idx));
+    const blob = await idbGet(photoKey(date, mealKey, idx));
     if (!blob) continue;
     const url = URL.createObjectURL(blob);
     const thumb = document.createElement('div'); thumb.className = 'photo-thumb';
-    thumb.innerHTML = `<img src="${url}" alt=""><button class="photo-thumb-remove" onclick="removePhoto('${mealKey}',${idx})">&#x2715;</button>`;
+    thumb.innerHTML = `<img src="${url}" alt=""><button class="photo-thumb-remove" onclick="removePhoto('${date}','${mealKey}',${idx})">&#x2715;</button>`;
     strip.appendChild(thumb);
   }
-  addBtn.classList.toggle('disabled', count >= MAX_PHOTOS);
-  badge.textContent = count > 0 ? `${count}/${MAX_PHOTOS}` : '';
+  if (addBtn) addBtn.classList.toggle('disabled', count >= MAX_PHOTOS);
+  if (badge) badge.textContent = count > 0 ? `${count}/${MAX_PHOTOS}` : '';
 }
 
-async function removePhoto(mealKey, idx) {
-  const all = loadAll(); const count = all[currentDate]?.[mealKey]?.photoCount || 0;
+async function removePhoto(date, mealKey, idx) {
+  const all = loadAll(); const count = all[date]?.[mealKey]?.photoCount || 0;
   for (let i = idx; i < count - 1; i++) {
-    const blob = await idbGet(photoKey(currentDate, mealKey, i + 1));
-    if (blob) await idbPut(photoKey(currentDate, mealKey, i), blob);
+    const blob = await idbGet(photoKey(date, mealKey, i + 1));
+    if (blob) await idbPut(photoKey(date, mealKey, i), blob);
   }
-  await idbDelete(photoKey(currentDate, mealKey, count - 1));
-  if (all[currentDate]?.[mealKey]) { all[currentDate][mealKey].photoCount = Math.max(0, count - 1); saveAll(all); }
-  await renderPhotoStrip(mealKey); updateComposite();
+  await idbDelete(photoKey(date, mealKey, count - 1));
+  if (all[date]?.[mealKey]) { all[date][mealKey].photoCount = Math.max(0, count - 1); saveAll(all); }
+  await renderPhotoStrip(date, mealKey);
+  updateComposite(date);
 }
 
 async function compressImageToBlob(file, maxW=640, quality=0.72) {
@@ -587,48 +634,62 @@ async function compressImageToBlob(file, maxW=640, quality=0.72) {
 // 保存
 // ============================================================
 let autoSaveTimer = null;
-function autoSave() { clearTimeout(autoSaveTimer); autoSaveTimer = setTimeout(()=>saveDay(true), 1200); }
-
-function saveDay(silent=false) {
-  const all = loadAll();
-  if (!all[currentDate]) all[currentDate] = emptyDay();
-  MEALS.forEach(meal => {
-    if (!all[currentDate][meal.key]) all[currentDate][meal.key] = { photoCount:0, memo:'' };
-    all[currentDate][meal.key].memo = document.getElementById(`memo-${meal.key}`).value;
-  });
-  saveAll(all);
-  if (!silent) { toast('保存しました'); updateComposite(); renderHistory(); }
+function autoSave(el) {
+  const date = el ? el.dataset.date : null;
+  if (!date) return;
+  clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(() => saveDay(date, true), 1200);
 }
 
-async function clearDay() {
+function saveDay(date, silent=false) {
+  const all = loadAll();
+  if (!all[date]) all[date] = emptyDay();
+  MEALS.forEach(meal => {
+    if (!all[date][meal.key]) all[date][meal.key] = { photoCount:0, memo:'' };
+    const el = document.getElementById(`memo-${date}-${meal.key}`);
+    if (el) all[date][meal.key].memo = el.value;
+  });
+  saveAll(all);
+  if (!silent) { toast('保存しました'); renderHistory(); }
+}
+
+async function copyMemo(date, mealKey) {
+  const el = document.getElementById(`memo-${date}-${mealKey}`);
+  if (!el || !el.value.trim()) { toast('テキストがありません'); return; }
+  try { await navigator.clipboard.writeText(el.value); } catch(e) { el.select(); document.execCommand('copy'); }
+  const btn = document.getElementById(`copyBtn-${date}-${mealKey}`);
+  if (btn) { btn.textContent = '済'; setTimeout(() => btn.textContent = 'コピー', 1500); }
+}
+
+async function clearDay(date) {
   if (!confirm('この日の記録を削除しますか？')) return;
   const all = loadAll();
-  const dayMeta = all[currentDate] || {};
+  const dayMeta = all[date] || {};
   for (const meal of MEALS) {
     const count = dayMeta[meal.key]?.photoCount || 0;
-    for (let i = 0; i < count; i++) await idbDelete(photoKey(currentDate, meal.key, i));
+    for (let i = 0; i < count; i++) await idbDelete(photoKey(date, meal.key, i));
   }
-  delete all[currentDate]; saveAll(all);
-  for (const meal of MEALS) { await renderPhotoStrip(meal.key); document.getElementById(`memo-${meal.key}`).value=''; }
-  updateComposite(); renderHistory(); toast('削除しました');
+  delete all[date]; saveAll(all);
+  MEALS.forEach(meal => { const el = document.getElementById(`memo-${date}-${meal.key}`); if (el) el.value=''; });
+  for (const meal of MEALS) { await renderPhotoStrip(date, meal.key); }
+  renderHistory(); toast('削除しました');
 }
 
 // ============================================================
 // 合成画像
 // ============================================================
-function updateComposite() {
-  const all = loadAll(); const dayMeta = all[currentDate] || {};
+function updateComposite(date) {
+  const all = loadAll(); const dayMeta = all[date] || {};
   const hasPhoto = MEALS.some(m => (dayMeta[m.key]?.photoCount || 0) > 0);
-  if (hasPhoto) generateComposite();
+  if (hasPhoto) generateComposite(date);
   else {
-    const preview = document.getElementById('compositePreview');
-    preview.style.display='none'; preview.src='';
-    document.getElementById('noPhotoMsg').style.display='block';
+    const wrap = document.getElementById(`compositeWrap-${date}`);
+    if (wrap) wrap.style.display = 'none';
   }
 }
 
-async function generateComposite() {
-  const all = loadAll(); const dayMeta = all[currentDate] || {};
+async function generateComposite(date) {
+  const all = loadAll(); const dayMeta = all[date] || {};
   const size=1024, half=512;
   const canvas = document.createElement('canvas'); canvas.width=size; canvas.height=size;
   const ctx = canvas.getContext('2d');
@@ -640,7 +701,7 @@ async function generateComposite() {
     const count = dayMeta[meal.key]?.photoCount || 0;
     ctx.strokeStyle='#d1d1d6'; ctx.lineWidth=3; ctx.strokeRect(x,y,half,half);
     if (count > 0) {
-      const blob = await idbGet(photoKey(currentDate, meal.key, 0));
+      const blob = await idbGet(photoKey(date, meal.key, 0));
       if (blob) { const url = URL.createObjectURL(blob); await drawCover(ctx, url, x, y, half, half); URL.revokeObjectURL(url); }
       else { ctx.fillStyle='#f5f5f7'; ctx.fillRect(x,y,half,half); ctx.fillStyle='#8e8e93'; ctx.font='bold 14px sans-serif'; ctx.textAlign='center'; ctx.fillText('記録なし',x+half/2,y+half/2+5); }
     } else {
@@ -652,18 +713,23 @@ async function generateComposite() {
     if (count>1) { ctx.fillStyle='rgba(255,255,255,.85)'; ctx.font='bold 11px sans-serif'; ctx.textAlign='right'; ctx.fillText(`×${count}`,x+half-8,y+20); }
     ctx.textAlign='left';
   }
-  ctx.fillStyle='rgba(255,255,255,.8)'; ctx.font='bold 13px sans-serif'; ctx.textAlign='right'; ctx.fillText(currentDate,size-8,size-8);
+  ctx.fillStyle='rgba(255,255,255,.8)'; ctx.font='bold 13px sans-serif'; ctx.textAlign='right'; ctx.fillText(date,size-8,size-8);
   const dataUrl = canvas.toDataURL('image/jpeg',.80);
-  const preview = document.getElementById('compositePreview');
-  preview.src=dataUrl; preview.style.display='block'; preview._dataUrl=dataUrl;
-  document.getElementById('noPhotoMsg').style.display='none';
+  const img = document.getElementById(`compositeImg-${date}`);
+  const wrap = document.getElementById(`compositeWrap-${date}`);
+  if (img && wrap) { img.src = dataUrl; wrap.style.display = 'flex'; }
+}
+
+function downloadComposite(date) {
+  const img = document.getElementById(`compositeImg-${date}`);
+  if (!img || !img.src) { toast('写真がありません'); return; }
+  const a = document.createElement('a'); a.href = img.src; a.download = `${date.replace(/-/g,'')}.jpg`; a.click();
 }
 
 function drawCover(ctx, dataUrl, x, y, w, h) {
   return new Promise(resolve => {
     const img=new Image();
     img.onload=()=>{
-      // contain: 縦横比を保ったまま全体をセル内に収める
       const s=Math.min(w/img.naturalWidth,h/img.naturalHeight);
       const sw=img.naturalWidth*s, sh=img.naturalHeight*s;
       ctx.fillStyle='#f0f0f0';
@@ -673,12 +739,6 @@ function drawCover(ctx, dataUrl, x, y, w, h) {
     };
     img.src=dataUrl;
   });
-}
-
-function downloadComposite() {
-  const p=document.getElementById('compositePreview');
-  if (!p.src||p.style.display==='none') { toast('写真がありません'); return; }
-  const a=document.createElement('a'); a.href=p.src; a.download=`${currentDate.replace(/-/g,'')}.jpg`; a.click();
 }
 
 // ============================================================
@@ -692,7 +752,7 @@ function getWeekDates(sun) { return Array.from({length:7},(_,i)=>addDays(sun,i))
 
 function updateWeekSelect() {
   const sel=document.getElementById('weekSelect'); const all=loadAll();
-  const weeks=new Set(Object.keys(all).map(getSunday)); weeks.add(getSunday(currentDate));
+  const weeks=new Set(Object.keys(all).map(getSunday)); weeks.add(currentWeekSunday);
   sel.innerHTML=Array.from(weeks).sort().reverse().map(w=>`<option value="${w}">${w} 〜 ${addDays(w,6)}</option>`).join('');
 }
 
@@ -900,7 +960,7 @@ function renderHistory() {
   }).join('');
 }
 
-async function jumpToDate(date) { saveDay(true); currentDate=date; await renderDay(date); }
+async function jumpToDate(date) { await navToWeek(getSunday(date)); }
 
 // ============================================================
 // バックアップ / 復元
@@ -946,7 +1006,7 @@ async function deleteAllData() {
   });
   // localStorage全削除
   localStorage.removeItem(STORAGE_KEY);
-  await renderDay(currentDate); renderHistory(); updateWeekSelect();
+  await renderWeek(currentWeekSunday); renderHistory(); updateWeekSelect();
   document.getElementById('backupInfo').textContent = `${days.length}日分のデータを削除しました`;
   toast('全データを削除しました');
 }
@@ -998,9 +1058,9 @@ function importBackup(input) {
         hvSortedDates = obj.health.dates;
         hvHas = Object.assign(hvHas, obj.health.has || {});
         hvRenderAll();
-        renderHealthSummaryBar(currentDate);
+        refreshWeekHealthBars();
       }
-      await renderDay(currentDate); renderHistory(); updateWeekSelect();
+      await renderWeek(currentWeekSunday); renderHistory(); updateWeekSelect();
       const healthMsg = obj.health ? `・ヘルスデータ${obj.health.dates.length}日分` : '';
       document.getElementById('backupInfo').textContent = `${importedKeys.length}日分を読み込みました（合計${Object.keys(merged).length}日）${healthMsg}`;
       toast('読み込み完了');
@@ -1011,16 +1071,16 @@ function importBackup(input) {
 }
 
 // ============================================================
-// 日付ナビ
+// 週ナビ
 // ============================================================
-async function navToDate(newDate) {
-  try { saveDay(true); } catch(e) { console.warn('saveDay on nav:', e); }
-  currentDate = newDate; await renderDay(currentDate);
+async function navToWeek(sunday) {
+  currentWeekSunday = sunday;
+  await renderWeek(sunday);
 }
-document.getElementById('prevDay').addEventListener('click', ()=>navToDate(addDays(currentDate,-1)));
-document.getElementById('nextDay').addEventListener('click', ()=>navToDate(addDays(currentDate,1)));
-document.getElementById('dateDisplay').addEventListener('click', ()=>{ document.getElementById('datePicker').showPicker?.(); document.getElementById('datePicker').click(); });
-document.getElementById('datePicker').addEventListener('change', async e => { if(!e.target.value) return; await navToDate(e.target.value); });
+document.getElementById('prevWeek').addEventListener('click', ()=>navToWeek(addDays(currentWeekSunday,-7)));
+document.getElementById('nextWeek').addEventListener('click', ()=>navToWeek(addDays(currentWeekSunday,7)));
+document.getElementById('weekDisplay').addEventListener('click', ()=>{ document.getElementById('datePicker').showPicker?.(); document.getElementById('datePicker').click(); });
+document.getElementById('datePicker').addEventListener('change', async e => { if(!e.target.value) return; await navToWeek(getSunday(e.target.value)); });
 
 // ============================================================
 // ヘルスデータタブ（health_viewer1 統合・hv_ プレフィックス）
@@ -1077,7 +1137,7 @@ async function hvProcessFile(file) {
     hvRenderAll();
     // 永続化（次回起動時に復元）
     try { localStorage.setItem('hv2_health', JSON.stringify({dates:hvSortedDates, map:hvDayMap, has:hvHas})); } catch(e) {}
-    renderHealthSummaryBar(currentDate);
+    refreshWeekHealthBars();
     toast(`ヘルスデータ読み込み完了（${hvSortedDates.length}日分）`);
   } catch(err) {
     hvSetProgress(false);
@@ -1389,7 +1449,6 @@ function hvTick() { return new Promise(r=>setTimeout(r,30)); }
 // ============================================================
 // 初期化
 // ============================================================
-buildMealGrid();
 (async () => {
   // 保存済みヘルスデータの復元
   try {
@@ -1406,7 +1465,7 @@ buildMealGrid();
   } catch(e) { console.warn('hv2_health 復元エラー:', e); }
 
   await migratePhotos();
-  await renderDay(currentDate);
+  await renderWeek(currentWeekSunday);
 })();
 </script>
 <!-- Cloudflare Web Analytics --><script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "952c50f223bb4a248355c1299810b53e"}'></script><!-- End Cloudflare Web Analytics -->
