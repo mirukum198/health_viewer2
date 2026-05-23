@@ -38,9 +38,8 @@ header h1 { font-size:15px; font-weight:700; color:var(--accent); }
 .week-day-title { font-size:14px; font-weight:700; }
 .week-day-today { color:var(--accent); }
 .week-health-bar { font-size:12px; color:var(--sub); line-height:1.8; margin-bottom:8px; padding:6px 8px; background:var(--card2); border-radius:6px; }
-.day-composite-wrap { margin-top:10px; display:flex; align-items:flex-start; gap:10px; flex-wrap:wrap; }
-.day-composite-wrap img { width:160px; height:160px; object-fit:cover; border-radius:8px; border:1px solid var(--border); display:block; }
-.day-composite-actions { display:flex; flex-direction:column; gap:6px; }
+.day-composite-wrap { margin-top:10px; }
+.day-composite-wrap img { width:100%; border-radius:8px; display:block; border:1px solid var(--border); }
 
 /* ===== 共通レイアウト ===== */
 .tab-main { max-width:720px; margin:0 auto; padding:14px; }
@@ -481,9 +480,6 @@ function buildWeekGrid(sunday) {
       <div class="meal-grid" id="mealGrid-${date}"></div>
       <div class="day-composite-wrap" id="compositeWrap-${date}" style="display:none;">
         <img id="compositeImg-${date}" alt="合成プレビュー">
-        <div class="day-composite-actions">
-          <button class="btn btn-secondary btn-sm" onclick="downloadComposite('${date}')">合成画像をDL</button>
-        </div>
       </div>
     `;
     weekGrid.appendChild(section);
@@ -717,13 +713,7 @@ async function generateComposite(date) {
   const dataUrl = canvas.toDataURL('image/jpeg',.80);
   const img = document.getElementById(`compositeImg-${date}`);
   const wrap = document.getElementById(`compositeWrap-${date}`);
-  if (img && wrap) { img.src = dataUrl; wrap.style.display = 'flex'; }
-}
-
-function downloadComposite(date) {
-  const img = document.getElementById(`compositeImg-${date}`);
-  if (!img || !img.src) { toast('写真がありません'); return; }
-  const a = document.createElement('a'); a.href = img.src; a.download = `${date.replace(/-/g,'')}.jpg`; a.click();
+  if (img && wrap) { img.src = dataUrl; wrap.style.display = 'block'; }
 }
 
 function drawCover(ctx, dataUrl, x, y, w, h) {
