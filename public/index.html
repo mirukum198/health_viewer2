@@ -30,6 +30,8 @@ header h1 { font-size:15px; font-weight:700; color:var(--accent); }
 .week-nav { display:flex; align-items:center; gap:8px; background:var(--card); padding:9px 16px; border-bottom:1px solid var(--border); }
 .week-nav button { background:var(--border); border:none; color:var(--text); padding:5px 12px; border-radius:6px; cursor:pointer; font-size:14px; }
 .week-nav button:hover { background:#c7c7cc; }
+#weekStartToggle { background:none; border:1px solid var(--border); color:var(--sub); padding:4px 8px; border-radius:6px; cursor:pointer; font-size:12px; white-space:nowrap; }
+#weekStartToggle:hover { background:var(--border); color:var(--text); }
 #weekDisplay { flex:1; text-align:center; font-weight:600; font-size:14px; cursor:pointer; }
 #weekDisplay:hover { color:var(--accent); }
 #datePicker { position:absolute; opacity:0; pointer-events:none; width:0; }
@@ -180,6 +182,7 @@ tr:last-child td { border-bottom:none; }
     <button id="prevWeek">&#8592;</button>
     <div id="weekDisplay">-</div>
     <button id="nextWeek">&#8594;</button>
+    <button id="weekStartToggle" onclick="toggleWeekStart()">日曜始まり</button>
     <input type="date" id="datePicker">
   </div>
 
@@ -338,12 +341,13 @@ function addDays(str, n) {
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 }
 let toastTimer = null;
-function toast(msg) {
+function toast(msg, duration=2200) {
   const el = document.getElementById('toast');
   el.textContent = msg; el.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
+  toastTimer = setTimeout(() => el.classList.remove('show'), duration);
 }
+function toastError(msg) { toast(msg, 8000); }
 
 // ============================================================
 // トップタブ切り替え
@@ -459,7 +463,7 @@ async function migratePhotos() {
 // ============================================================
 // 食事タブ: UI構築・描画
 // ============================================================
-let currentWeekSunday = getSunday(todayStr());
+let currentWeekStart = getWeekStart(todayStr());
 
 function buildWeekGrid(sunday) {
   const weekGrid = document.getElementById('weekGrid');
@@ -513,7 +517,7 @@ function buildMealCards(date) {
 }
 
 async function renderWeek(sunday) {
-  currentWeekSunday = sunday;
+  currentWeekStart = sunday;
   const dates = getWeekDates(sunday);
   const end = dates[6];
   document.getElementById('weekDisplay').textContent =
@@ -554,7 +558,7 @@ function renderHealthSummaryBar(date) {
 }
 
 function refreshWeekHealthBars() {
-  getWeekDates(currentWeekSunday).forEach(date => renderHealthSummaryBar(date));
+  getWeekDates(currentWeekStart).forEach(date => renderHealthSummaryBar(date));
 }
 
 // ============================================================
@@ -734,15 +738,22 @@ function drawCover(ctx, dataUrl, x, y, w, h) {
 // ============================================================
 // 週次エクスポート
 // ============================================================
-function getSunday(str) {
-  const d=new Date(str); d.setDate(d.getDate()-d.getDay()); // 日曜日へ戻す（0=日曜なのでそのまま）
+let weekStartMonday = localStorage.getItem('hv2_weekStartMonday') === '1';
+
+function getWeekStart(str) {
+  const d = new Date(str);
+  const day = d.getDay(); // 0=日, 1=月...
+  const offset = weekStartMonday ? (day === 0 ? -6 : 1 - day) : -day;
+  d.setDate(d.getDate() + offset);
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 }
+// 週次エクスポートselect用エイリアス
+function getSunday(str) { return getWeekStart(str); }
 function getWeekDates(sun) { return Array.from({length:7},(_,i)=>addDays(sun,i)); }
 
 function updateWeekSelect() {
   const sel=document.getElementById('weekSelect'); const all=loadAll();
-  const weeks=new Set(Object.keys(all).map(getSunday)); weeks.add(currentWeekSunday);
+  const weeks=new Set(Object.keys(all).map(getWeekStart)); weeks.add(currentWeekStart);
   sel.innerHTML=Array.from(weeks).sort().reverse().map(w=>`<option value="${w}">${w} 〜 ${addDays(w,6)}</option>`).join('');
 }
 
@@ -950,7 +961,7 @@ function renderHistory() {
   }).join('');
 }
 
-async function jumpToDate(date) { await navToWeek(getSunday(date)); }
+async function jumpToDate(date) { await navToWeek(getWeekStart(date)); }
 
 // ============================================================
 // バックアップ / 復元
@@ -996,7 +1007,7 @@ async function deleteAllData() {
   });
   // localStorage全削除
   localStorage.removeItem(STORAGE_KEY);
-  await renderWeek(currentWeekSunday); renderHistory(); updateWeekSelect();
+  await renderWeek(currentWeekStart); renderHistory(); updateWeekSelect();
   document.getElementById('backupInfo').textContent = `${days.length}日分のデータを削除しました`;
   toast('全データを削除しました');
 }
@@ -1050,27 +1061,41 @@ function importBackup(input) {
         hvRenderAll();
         refreshWeekHealthBars();
       }
-      await renderWeek(currentWeekSunday); renderHistory(); updateWeekSelect();
+      await renderWeek(currentWeekStart); renderHistory(); updateWeekSelect();
       const healthMsg = obj.health ? `・ヘルスデータ${obj.health.dates.length}日分` : '';
       document.getElementById('backupInfo').textContent = `${importedKeys.length}日分を読み込みました（合計${Object.keys(merged).length}日）${healthMsg}`;
       toast('読み込み完了');
-    } catch(err) { toast('読み込み失敗: ' + err.message); }
+    } catch(err) {
+      const msg = '読み込み失敗: ' + err.message;
+      toastError(msg);
+      document.getElementById('backupInfo').textContent = msg;
+    }
     input.value='';
   };
   reader.readAsText(file);
 }
 
 // ============================================================
+// 週始まり設定
+// ============================================================
+function toggleWeekStart() {
+  weekStartMonday = !weekStartMonday;
+  localStorage.setItem('hv2_weekStartMonday', weekStartMonday ? '1' : '0');
+  document.getElementById('weekStartToggle').textContent = weekStartMonday ? '月曜始まり' : '日曜始まり';
+  navToWeek(getWeekStart(currentWeekStart));
+}
+
+// ============================================================
 // 週ナビ
 // ============================================================
 async function navToWeek(sunday) {
-  currentWeekSunday = sunday;
+  currentWeekStart = sunday;
   await renderWeek(sunday);
 }
-document.getElementById('prevWeek').addEventListener('click', ()=>navToWeek(addDays(currentWeekSunday,-7)));
-document.getElementById('nextWeek').addEventListener('click', ()=>navToWeek(addDays(currentWeekSunday,7)));
+document.getElementById('prevWeek').addEventListener('click', ()=>navToWeek(addDays(currentWeekStart,-7)));
+document.getElementById('nextWeek').addEventListener('click', ()=>navToWeek(addDays(currentWeekStart,7)));
 document.getElementById('weekDisplay').addEventListener('click', ()=>{ document.getElementById('datePicker').showPicker?.(); document.getElementById('datePicker').click(); });
-document.getElementById('datePicker').addEventListener('change', async e => { if(!e.target.value) return; await navToWeek(getSunday(e.target.value)); });
+document.getElementById('datePicker').addEventListener('change', async e => { if(!e.target.value) return; await navToWeek(getWeekStart(e.target.value)); });
 
 // ============================================================
 // ヘルスデータタブ（health_viewer1 統合・hv_ プレフィックス）
@@ -1454,8 +1479,9 @@ function hvTick() { return new Promise(r=>setTimeout(r,30)); }
     }
   } catch(e) { console.warn('hv2_health 復元エラー:', e); }
 
+  document.getElementById('weekStartToggle').textContent = weekStartMonday ? '月曜始まり' : '日曜始まり';
   await migratePhotos();
-  await renderWeek(currentWeekSunday);
+  await renderWeek(currentWeekStart);
 })();
 </script>
 <!-- Cloudflare Web Analytics --><script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "952c50f223bb4a248355c1299810b53e"}'></script><!-- End Cloudflare Web Analytics -->
