@@ -159,9 +159,52 @@ tr:last-child td { border-bottom:none; }
 /* ===== トースト ===== */
 #toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%) translateY(60px); background:#1d1d1f; color:#fff; padding:9px 18px; border-radius:8px; font-size:13px; transition:transform .25s; z-index:999; white-space:nowrap; }
 #toast.show { transform:translateX(-50%) translateY(0); }
+
+/* ===== 認証ゲート ===== */
+.gate-screen { display:none; max-width:380px; margin:60px auto; padding:0 16px; }
+.gate-card { background:white; border-radius:18px; padding:36px 28px; text-align:center; box-shadow:0 2px 20px rgba(0,0,0,0.08); }
+.gate-title { font-size:20px; font-weight:700; margin-bottom:10px; }
+.gate-desc { font-size:13px; color:#8e8e93; line-height:1.7; margin-bottom:22px; }
+.gate-input { width:100%; font-size:16px; border:1.5px solid #d1d1d6; border-radius:10px; padding:12px 14px; outline:none; margin-bottom:12px; color:#1d1d1f; font-family:inherit; }
+.gate-input:focus { border-color:#007aff; }
+.gate-btn { width:100%; background:#007aff; color:white; border:none; border-radius:10px; padding:13px; font-size:15px; font-weight:600; cursor:pointer; }
+.gate-btn:hover { background:#0065d8; }
+.gate-error { color:#ff3b30; font-size:13px; margin-top:10px; min-height:18px; }
+.gate-copy { text-align:center; font-size:11px; color:#8e8e93; margin-top:16px; }
 </style>
 </head>
 <body>
+
+<div style="background:#fff8e1;border-bottom:1px solid #ffe082;padding:12px 20px;font-size:12px;color:#5f4b00;line-height:1.7;">
+  <strong>【利用規約・禁止事項】</strong>　本ツールはnote有料コンテンツの購読者限定です。以下を禁止します。<br>
+  ・このURLを第三者に教えること、SNS・ブログ・他サービスへの掲載　・本ツールの複製・改変・再配布　・本ツールを利用した商用サービスの提供　・著作権表示の削除または改ざん<br>
+  Copyright &copy; mirukum198 All Rights Reserved.
+</div>
+
+<!-- Expired screen -->
+<div class="gate-screen" id="expiredScreen">
+  <div class="gate-card">
+    <div class="gate-title">health_viewer2</div>
+    <p class="gate-desc">現在のパスワードの有効期限が終了しました。<br>最新のパスワードはnoteの有料記事でご確認ください。</p>
+  </div>
+  <p class="gate-copy">Copyright &copy; mirukum198 All Rights Reserved.</p>
+</div>
+
+<!-- Auth screen -->
+<div class="gate-screen" id="authScreen">
+  <div class="gate-card">
+    <div class="gate-title">health_viewer2</div>
+    <p class="gate-desc">noteの有料コンテンツ購読者専用ツールです。<br>パスワードを入力してください。</p>
+    <input type="password" id="pwInput" class="gate-input" placeholder="パスワード"
+      onkeydown="if(event.key==='Enter')submitPassword()">
+    <button class="gate-btn" onclick="submitPassword()">ログイン</button>
+    <p class="gate-error" id="pwError"></p>
+  </div>
+  <p class="gate-copy">Copyright &copy; mirukum198 All Rights Reserved.</p>
+</div>
+
+<!-- Main content -->
+<div id="mainContent" style="display:none">
 
 <header>
   <h1>health_viewer2</h1>
@@ -310,9 +353,63 @@ tr:last-child td { border-bottom:none; }
   </div>
 </div>
 
+</div><!-- /mainContent -->
+
 <div id="toast"></div>
 
 <script>
+// ============================================================
+// 認証（SHA-256 / フェーズ管理）
+// ============================================================
+const _PH1_HASH   = '0fcc0078ebfdda5b4d1e5504ee77d2c59be81c62aa60e28906a27156ac4e9fc5';
+const _PH1_END    = new Date('2026-07-01T00:00:00+09:00');
+const _TRIAL2_HASH = 'ee0a3d79bf010f978bbb27f63e5c0ee9b78106334ca626f93922ced73c4829c0';
+const _TRIAL2_END  = new Date('2026-06-14T00:00:00+09:00'); // trial20260613e の有効期限
+
+function _currentPhase() {
+  const now = new Date();
+  if (now < _PH1_END) return 1;
+  return 0; // サービス終了
+}
+
+function _trial2Active() {
+  return new Date() < _TRIAL2_END;
+}
+
+async function _sha256(str) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+async function checkAuth() {
+  const phase = _currentPhase();
+  if (phase === 0) {
+    document.getElementById('expiredScreen').style.display = 'block';
+    return;
+  }
+  if (sessionStorage.getItem('hv2_auth') === 'ok') {
+    document.getElementById('mainContent').style.display = 'block';
+    return;
+  }
+  document.getElementById('authScreen').style.display = 'block';
+}
+
+async function submitPassword() {
+  const pw = document.getElementById('pwInput').value.trim();
+  if (!pw) return;
+  const hash = await _sha256(pw);
+  const expected = _PH1_HASH;
+  const isTrial = _trial2Active() && hash === _TRIAL2_HASH;
+  if (hash === expected || isTrial) {
+    sessionStorage.setItem('hv2_auth', 'ok');
+    document.getElementById('authScreen').style.display = 'none';
+    document.getElementById('mainContent').style.display = 'block';
+  } else {
+    document.getElementById('pwError').textContent = 'パスワードが違います';
+    document.getElementById('pwInput').value = '';
+  }
+}
+
 // ============================================================
 // 共通ユーティリティ
 // ============================================================
@@ -1464,6 +1561,9 @@ function hvTick() { return new Promise(r=>setTimeout(r,30)); }
 // 初期化
 // ============================================================
 (async () => {
+  await checkAuth();
+  if (sessionStorage.getItem('hv2_auth') !== 'ok') return;
+
   // 保存済みヘルスデータの復元
   try {
     const savedHealth = localStorage.getItem('hv2_health');
