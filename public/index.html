@@ -398,6 +398,7 @@ async function submitPassword() {
     document.getElementById('authScreen').style.display = 'none';
     document.getElementById('mainContent').style.display = 'block';
     if (isTrialAuth) document.getElementById('trialBanner').style.display = 'block';
+    await initApp();
   } else {
     document.getElementById('pwError').textContent = 'パスワードが違います';
     document.getElementById('pwInput').value = '';
@@ -1540,10 +1541,7 @@ function hvTick() { return new Promise(r=>setTimeout(r,30)); }
 // ============================================================
 // 初期化
 // ============================================================
-(async () => {
-  await checkAuth();
-  if (sessionStorage.getItem('hv2_auth') !== 'ok') return;
-
+async function initApp() {
   // 保存済みヘルスデータの復元
   try {
     const savedHealth = localStorage.getItem('hv2_health');
@@ -1561,6 +1559,13 @@ function hvTick() { return new Promise(r=>setTimeout(r,30)); }
   document.getElementById('weekStartToggle').textContent = weekStartMonday ? '月曜始まり' : '日曜始まり';
   await migratePhotos();
   await renderWeek(currentWeekStart);
+}
+
+(async () => {
+  await checkAuth();
+  if (sessionStorage.getItem('hv2_auth') !== 'ok') return;
+  // 既にセッション認証済み（ページリロード等）の場合はそのまま初期化
+  await initApp();
 })();
 </script>
 <!-- Cloudflare Web Analytics --><script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "952c50f223bb4a248355c1299810b53e"}'></script><!-- End Cloudflare Web Analytics -->
