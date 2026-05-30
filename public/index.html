@@ -196,6 +196,10 @@ tr:last-child td { border-bottom:none; }
 <!-- Main content -->
 <div id="mainContent" style="display:none">
 
+<div id="trialBanner" style="display:none;background:#fff3cd;border-bottom:1px solid #ffc107;padding:9px 16px;font-size:12px;color:#664d03;line-height:1.6;">
+  トライアルモード: データはこのセッション中のみ有効です。写真・メモは保存されません。毎回バックアップJSONを読み込んでください。
+</div>
+
 <header>
   <h1>health_viewer2</h1>
   <span style="font-size:11px;color:var(--sub);">ver 1.0.0</span>
@@ -374,6 +378,9 @@ async function checkAuth() {
   }
   if (sessionStorage.getItem('hv2_auth') === 'ok') {
     document.getElementById('mainContent').style.display = 'block';
+    if (sessionStorage.getItem('hv2_auth_mode') === 'trial') {
+      document.getElementById('trialBanner').style.display = 'block';
+    }
     return;
   }
   document.getElementById('authScreen').style.display = 'block';
@@ -384,16 +391,20 @@ async function submitPassword() {
   if (!pw) return;
   const hash = await _sha256(pw);
   const expected = _PH1_HASH;
-  const isTrial = _trial2Active() && hash === _TRIAL2_HASH;
-  if (hash === expected || isTrial) {
+  const isTrialAuth = _trial2Active() && hash === _TRIAL2_HASH;
+  if (hash === expected || isTrialAuth) {
     sessionStorage.setItem('hv2_auth', 'ok');
+    if (isTrialAuth) sessionStorage.setItem('hv2_auth_mode', 'trial');
     document.getElementById('authScreen').style.display = 'none';
     document.getElementById('mainContent').style.display = 'block';
+    if (isTrialAuth) document.getElementById('trialBanner').style.display = 'block';
   } else {
     document.getElementById('pwError').textContent = 'パスワードが違います';
     document.getElementById('pwInput').value = '';
   }
 }
+
+function isTrial() { return sessionStorage.getItem('hv2_auth_mode') === 'trial'; }
 
 // ============================================================
 // 共通ユーティリティ
@@ -447,6 +458,7 @@ function switchTopTab(tab) {
 // ============================================================
 function loadAll() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)||'{}'); } catch { return {}; } }
 function saveAll(data) {
+  if (isTrial()) return;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   } catch(e) {
@@ -480,6 +492,7 @@ function getDB() {
   });
 }
 async function idbPut(key, blob) {
+  if (isTrial()) return;
   const db = await getDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(IDB_STORE, 'readwrite');
@@ -1117,7 +1130,7 @@ function importBackup(input) {
       }
       const merged = { ...existing, ...importedMeta }; saveAll(merged);
       if (obj.health && obj.health.map && obj.health.dates) {
-        localStorage.setItem('hv2_health', JSON.stringify(obj.health));
+        if (!isTrial()) localStorage.setItem('hv2_health', JSON.stringify(obj.health));
         hvDayMap = obj.health.map;
         hvSortedDates = obj.health.dates;
         hvHas = Object.assign(hvHas, obj.health.has || {});
@@ -1143,7 +1156,7 @@ function importBackup(input) {
 // ============================================================
 function toggleWeekStart() {
   weekStartMonday = !weekStartMonday;
-  localStorage.setItem('hv2_weekStartMonday', weekStartMonday ? '1' : '0');
+  if (!isTrial()) localStorage.setItem('hv2_weekStartMonday', weekStartMonday ? '1' : '0');
   document.getElementById('weekStartToggle').textContent = weekStartMonday ? '月曜始まり' : '日曜始まり';
   navToWeek(getWeekStart(currentWeekStart));
 }
@@ -1214,7 +1227,7 @@ async function hvProcessFile(file) {
     hvSetProgress(false);
     hvRenderAll();
     // 永続化（次回起動時に復元）
-    try { localStorage.setItem('hv2_health', JSON.stringify({dates:hvSortedDates, map:hvDayMap, has:hvHas})); } catch(e) {}
+    if (!isTrial()) { try { localStorage.setItem('hv2_health', JSON.stringify({dates:hvSortedDates, map:hvDayMap, has:hvHas})); } catch(e) {} }
     refreshWeekHealthBars();
     toast(`ヘルスデータ読み込み完了（${hvSortedDates.length}日分）`);
   } catch(err) {
