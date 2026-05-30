@@ -95,16 +95,6 @@ header h1 { font-size:15px; font-weight:700; color:var(--accent); }
 .export-info { font-size:12px; color:var(--sub); margin-bottom:10px; line-height:1.6; }
 .md-preview { background:#f9f9fb; border:1px solid var(--border); border-radius:8px; padding:12px; font-size:12px; font-family:'Courier New',monospace; white-space:pre-wrap; color:#3a3a3c; max-height:200px; overflow-y:auto; display:none; margin-top:10px; line-height:1.6; }
 
-/* ===== 過去の記録 ===== */
-.history-list { display:flex; flex-direction:column; gap:6px; }
-.history-item { display:flex; align-items:center; justify-content:space-between; padding:8px 10px; background:var(--card2); border-radius:8px; cursor:pointer; font-size:13px; }
-.history-item:hover { background:var(--border); }
-.history-date { font-weight:600; }
-.history-meta { color:var(--sub); font-size:11px; margin-top:1px; }
-.history-dots { display:flex; gap:4px; }
-.history-dot { width:6px; height:6px; border-radius:50%; background:var(--border); }
-.history-dot.has-photo { background:var(--accent); }
-.history-dot.has-memo  { background:var(--green); }
 
 /* ===== ヘルスタブ ===== */
 .hv-notice { background:#f0f6ff; border:1px solid #c0d8ff; border-radius:10px; padding:11px 14px; margin-bottom:12px; font-size:12px; color:#3a5a90; line-height:1.7; }
@@ -208,7 +198,7 @@ tr:last-child td { border-bottom:none; }
 
 <header>
   <h1>health_viewer2</h1>
-  <span style="font-size:11px;color:var(--sub);">prototype</span>
+  <span style="font-size:11px;color:var(--sub);">ver 1.0.0</span>
 </header>
 
 <!-- トップタブ -->
@@ -241,11 +231,6 @@ tr:last-child td { border-bottom:none; }
         <button class="btn btn-secondary btn-sm" onclick="toggleMdPreview()">Markdownプレビュー</button>
       </div>
       <div class="md-preview" id="mdPreview"></div>
-    </div>
-
-    <div class="section-card">
-      <div class="section-title">過去の記録</div>
-      <div class="history-list" id="historyList"></div>
     </div>
 
     <div class="section-card">
@@ -632,7 +617,7 @@ async function renderWeek(sunday) {
     updateComposite(date);
     renderHealthSummaryBar(date);
   }
-  renderHistory(); updateWeekSelect();
+  updateWeekSelect();
 }
 
 async function renderAllPhotoStrips(date) {
@@ -748,7 +733,7 @@ function saveDay(date, silent=false) {
     if (el) all[date][meal.key].memo = el.value;
   });
   saveAll(all);
-  if (!silent) { toast('保存しました'); renderHistory(); }
+  if (!silent) { toast('保存しました'); }
 }
 
 async function copyMemo(date, mealKey) {
@@ -770,7 +755,7 @@ async function clearDay(date) {
   delete all[date]; saveAll(all);
   MEALS.forEach(meal => { const el = document.getElementById(`memo-${date}-${meal.key}`); if (el) el.value=''; });
   for (const meal of MEALS) { await renderPhotoStrip(date, meal.key); }
-  renderHistory(); toast('削除しました');
+  toast('削除しました');
 }
 
 // ============================================================
@@ -1042,24 +1027,6 @@ function toggleMdPreview() {
 }
 
 // ============================================================
-// 過去の記録
-// ============================================================
-function renderHistory() {
-  const all=loadAll(); const dates=Object.keys(all).sort().reverse().slice(0,14);
-  const list=document.getElementById('historyList');
-  if (!dates.length) { list.innerHTML='<div style="color:var(--sub);font-size:13px;">記録はありません</div>'; return; }
-  list.innerHTML=dates.map(date => {
-    const data=all[date];
-    const dots=MEALS.map(meal=>{ const m=data[meal.key]||{}; const hasP=(m.photoCount||0)>0; const hasM=!!m.memo?.trim(); return `<span class="history-dot ${hasP?'has-photo':hasM?'has-memo':''}"></span>`; }).join('');
-    const pc=MEALS.reduce((n,m)=>n+(data[m.key]?.photoCount||0),0);
-    const mc=MEALS.filter(m=>data[m.key]?.memo?.trim()).length;
-    return `<div class="history-item" onclick="jumpToDate('${date}')"><div><div class="history-date">${fmtDate(date)}</div><div class="history-meta">写真${pc}枚 / メモ${mc}食</div></div><div class="history-dots">${dots}</div></div>`;
-  }).join('');
-}
-
-async function jumpToDate(date) { await navToWeek(getWeekStart(date)); }
-
-// ============================================================
 // バックアップ / 復元
 // ============================================================
 async function exportBackup() {
@@ -1103,7 +1070,7 @@ async function deleteAllData() {
   });
   // localStorage全削除
   localStorage.removeItem(STORAGE_KEY);
-  await renderWeek(currentWeekStart); renderHistory(); updateWeekSelect();
+  await renderWeek(currentWeekStart); updateWeekSelect();
   document.getElementById('backupInfo').textContent = `${days.length}日分のデータを削除しました`;
   toast('全データを削除しました');
 }
@@ -1157,7 +1124,7 @@ function importBackup(input) {
         hvRenderAll();
         refreshWeekHealthBars();
       }
-      await renderWeek(currentWeekStart); renderHistory(); updateWeekSelect();
+      await renderWeek(currentWeekStart); updateWeekSelect();
       const healthMsg = obj.health ? `・ヘルスデータ${obj.health.dates.length}日分` : '';
       document.getElementById('backupInfo').textContent = `${importedKeys.length}日分を読み込みました（合計${Object.keys(merged).length}日）${healthMsg}`;
       toast('読み込み完了');
